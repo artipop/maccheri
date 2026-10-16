@@ -1,0 +1,91 @@
+{
+  "label": "host",
+  "model": "mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+  "timestamp": "2026-10-16T17:50:56+0700",
+  "env": {
+    "chip": "Apple M4",
+    "cpus": "10",
+    "memory_gb": 16.0,
+    "macos": "27.0.1",
+    "virtualized": false,
+    "metal": true,
+    "gpu": "Apple M4",
+    "mlx": "0.32.4"
+  },
+  "inference": {
+    "load_s": 1.31,
+    "runs": [
+      {
+        "prompt_tps": 1938.6426716594403,
+        "generation_tps": 278.6734146593242,
+        "generated_tokens": 256,
+        "peak_memory_gb": 0.37592287
+      },
+      {
+        "prompt_tps": 2094.352727414434,
+        "generation_tps": 277.2263431167513,
+        "generated_tokens": 256,
+        "peak_memory_gb": 0.375636128
+      },
+      {
+        "prompt_tps": 2005.9222192561688,
+        "generation_tps": 278.93586160596124,
+        "generated_tokens": 256,
+        "peak_memory_gb": 0.370741388
+      }
+    ],
+    "best": {
+      "prompt_tps": 2005.9222192561688,
+      "generation_tps": 278.93586160596124,
+      "generated_tokens": 256,
+      "peak_memory_gb": 0.370741388
+    }
+  },
+  "lora": {
+    "iters": 60,
+    "batch_size": 4,
+    "num_layers": 8,
+    "wall_s": 22.4,
+    "reports": [
+      {
+        "iter": 10,
+        "loss": 0.605,
+        "it_per_s": 3.015,
+        "tokens_per_s": 1236.0
+      },
+      {
+        "iter": 20,
+        "loss": 0.091,
+        "it_per_s": 2.917,
+        "tokens_per_s": 1225.0
+      },
+      {
+        "iter": 30,
+        "loss": 0.064,
+        "it_per_s": 3.095,
+        "tokens_per_s": 1269.0
+      },
+      {
+        "iter": 40,
+        "loss": 0.059,
+        "it_per_s": 2.948,
+        "tokens_per_s": 1238.0
+      },
+      {
+        "iter": 50,
+        "loss": 0.061,
+        "it_per_s": 3.017,
+        "tokens_per_s": 1237.0
+      },
+      {
+        "iter": 60,
+        "loss": 0.054,
+        "it_per_s": 2.966,
+        "tokens_per_s": 1216.0
+      }
+    ],
+    "it_per_s": 2.989,
+    "tokens_per_s": 1237.0,
+    "peak_memory_gb": 1.6
+  }
+}

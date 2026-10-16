@@ -1,0 +1,72 @@
+{
+  "default-configuration": "Release",
+  "configurations": [
+    { "name": "Debug", "file": { "anchor": "Config", "relative-path": "Debug.xcconfig" } },
+    { "name": "Release", "file": { "anchor": "Config", "relative-path": "Release.xcconfig" } },
+  ],
+  "localizations": {
+    "development": "en",
+    "supported": [
+      "en",
+      "ru",
+    ],
+  },
+  "packages": [
+    {
+      "kind": "local",
+      "path": "../protocol",
+    },
+  ],
+  "files": [
+    { "kind": "folder", "path": "Maccheri", "target-membership": [ "Maccheri" ] },
+    { "kind": "folder", "path": "Config" },
+  ],
+  "targets": [
+    {
+      "name": "Maccheri",
+      "id": "4D41434348455249",
+      "product-type": "application",
+      "build-phases": [
+        "compile-sources",
+        "frameworks",
+        "resources",
+      ],
+      "package-product-members": [
+        {
+          "package": "protocol",
+          "product-name": "MaccheriProtocol",
+          "build-phase": { "build-phase": "frameworks" },
+        },
+      ],
+      "build-settings": {
+        "CODE_SIGN_IDENTITY": "-",
+        "CODE_SIGN_STYLE": "Automatic",
+        "COMBINE_HIDPI_IMAGES": "YES",
+        "CURRENT_PROJECT_VERSION": "1",
+        "ENABLE_APP_SANDBOX": "NO",
+        "ENABLE_HARDENED_RUNTIME": "YES",
+        "GENERATE_INFOPLIST_FILE": "YES",
+        "INFOPLIST_KEY_CFBundleDisplayName": "Maccheri",
+        "INFOPLIST_KEY_LSApplicationCategoryType": "public.app-category.developer-tools",
+        "INFOPLIST_KEY_LSUIElement": "YES",
+        "MARKETING_VERSION": "0.1.0",
+        "PRODUCT_BUNDLE_IDENTIFIER": "dev.maccheri.host",
+        "PRODUCT_NAME": "$(TARGET_NAME)",
+      },
+    },
+  ],
+  "build-settings": {
+    "ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS": "YES",
+    "CLANG_ENABLE_MODULES": "YES",
+    "ENABLE_STRICT_OBJC_MSGSEND": "YES",
+    "ENABLE_USER_SCRIPT_SANDBOXING": "YES",
+    "MACOSX_DEPLOYMENT_TARGET": "15.0",
+    "SDKROOT": "macosx",
+    "STRING_CATALOG_GENERATE_SYMBOLS": "YES",
+    "SWIFT_APPROACHABLE_CONCURRENCY": "YES",
+    "SWIFT_DEFAULT_ACTOR_ISOLATION": "MainActor",
+    "SWIFT_EMIT_LOC_STRINGS": "YES",
+    "SWIFT_VERSION": "6.0",
+  },
+  "products-group": null,
+}
