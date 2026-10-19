@@ -15,6 +15,8 @@ guard let imagesPath = argument("--images"), let workPath = argument("--work"), 
     FileHandle.standardError.write(Data("usage: maccheri-vm --images DIR --work DIR --image NAME [--timeout SECONDS] [--keep]\n".utf8))
     exit(64)
 }
+// Line-buffered even when redirected to a log file.
+setvbuf(stdout, nil, _IOLBF, 0)
 let timeout = Duration.seconds(argument("--timeout").flatMap(Int.init) ?? 3600)
 let keep = CommandLine.arguments.contains("--keep")
 

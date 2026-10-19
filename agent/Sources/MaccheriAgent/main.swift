@@ -22,6 +22,8 @@ else {
     exit(64)
 }
 
+// Line-buffered even when redirected to a log file.
+setvbuf(stdout, nil, _IOLBF, 0)
 let labels = ["maccheri"] + arguments("--label")
 let runner = JobRunner(
     source: ControlPlaneClient(baseURL: controlPlane, token: token),
