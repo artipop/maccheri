@@ -26,7 +26,7 @@ let labels = ["maccheri"] + arguments("--label")
 let runner = JobRunner(
     source: ControlPlaneClient(baseURL: controlPlane, token: token),
     images: ImageStore(imagesDirectory: URL(filePath: imagesPath), workDirectory: URL(filePath: workPath)),
-    vm: VirtualizationRunner(),
+    vm: VirtualizationRunner { print("vm started, mac \($0)") },
     labels: labels
 )
 

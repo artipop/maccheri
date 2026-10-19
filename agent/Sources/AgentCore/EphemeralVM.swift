@@ -17,14 +17,24 @@ public struct VirtualizationRunner: VMRunner {
     /// Guests see the job directory at `/Volumes/My Shared Files/maccheri`.
     public static let sharedDirectoryName = "maccheri"
 
-    public init() {}
+    /// Called once the guest is running, with the NIC's MAC address (the key for finding the
+    /// guest's DHCP lease in `/var/db/dhcpd_leases`).
+    private let onStart: @Sendable (_ macAddress: String) -> Void
 
-    public func run(_ bundle: VMBundle, sharedDirectory: URL, timeout: Duration) async throws -> VMExit {
-        let configuration = try Self.configuration(for: bundle, sharedDirectory: sharedDirectory)
-        return try await MachineSession(configuration: configuration).run(timeout: timeout)
+    public init(onStart: @escaping @Sendable (_ macAddress: String) -> Void = { _ in }) {
+        self.onStart = onStart
     }
 
-    static func configuration(for bundle: VMBundle, sharedDirectory: URL) throws -> VZVirtualMachineConfiguration {
+    public func run(_ bundle: VMBundle, sharedDirectory: URL, timeout: Duration) async throws -> VMExit {
+        let mac = VZMACAddress.randomLocallyAdministered()
+        let configuration = try Self.configuration(for: bundle, sharedDirectory: sharedDirectory, macAddress: mac)
+        let macString = mac.string
+        return try await MachineSession(configuration: configuration).run(timeout: timeout) { [onStart] in
+            onStart(macString)
+        }
+    }
+
+    static func configuration(for bundle: VMBundle, sharedDirectory: URL, macAddress: VZMACAddress = .randomLocallyAdministered()) throws -> VZVirtualMachineConfiguration {
         guard let modelData = bundle.hardwareModelData, let model = VZMacHardwareModel(dataRepresentation: modelData) else {
             throw AgentError.invalidVMConfiguration("bad hardware model")
         }
@@ -50,7 +60,7 @@ public struct VirtualizationRunner: VMRunner {
         // Prototype networking; replaced by the socketpair + WireGuard pipe later.
         let network = VZVirtioNetworkDeviceConfiguration()
         network.attachment = VZNATNetworkDeviceAttachment()
-        network.macAddress = .randomLocallyAdministered()
+        network.macAddress = macAddress
         config.networkDevices = [network]
 
         let share = VZVirtioFileSystemDeviceConfiguration(tag: VZVirtioFileSystemDeviceConfiguration.macOSGuestAutomountTag)
@@ -89,10 +99,11 @@ private final class MachineSession: NSObject, VZVirtualMachineDelegate {
 
     private var timedOut = false
 
-    func run(timeout: Duration) async throws -> VMExit {
+    func run(timeout: Duration, started onStarted: @Sendable () -> Void) async throws -> VMExit {
         try await withCheckedThrowingContinuation { (started: CheckedContinuation<Void, any Error>) in
             machine.start { result in started.resume(with: result) }
         }
+        onStarted()
         let deadline = Task { @MainActor [weak self] in
             try await Task.sleep(for: timeout)
             self?.forceStop()

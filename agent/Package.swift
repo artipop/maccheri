@@ -13,6 +13,7 @@ let package = Package(
             dependencies: [.product(name: "MaccheriProtocol", package: "protocol")]
         ),
         .executableTarget(name: "maccheri-agent", dependencies: ["AgentCore"], path: "Sources/MaccheriAgent"),
+        .executableTarget(name: "maccheri-vm", dependencies: ["AgentCore"], path: "Sources/MaccheriVM"),
         .testTarget(name: "AgentCoreTests", dependencies: ["AgentCore"]),
     ]
 )
