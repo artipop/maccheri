@@ -1,0 +1,7 @@
+{
+  "candidate" : {
+    "candidate" : "candidate:842163049 1 udp 1677729535 203.0.113.7 54321 typ srflx raddr 0.0.0.0 rport 0 generation 0",
+    "sdpMLineIndex" : 0,
+    "sdpMid" : "0"
+  }
+}

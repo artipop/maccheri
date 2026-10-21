@@ -1,0 +1,32 @@
+{
+  "createdAt" : "2026-10-21T10:00:00Z",
+  "device" : {
+    "deviceType" : "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+    "runtime" : "com.apple.CoreSimulator.SimRuntime.iOS-27-2"
+  },
+  "expiresAt" : "2026-10-21T11:00:00Z",
+  "hostID" : "0B7E5C3A-2D4F-4A61-8E9B-7C1D2E3F4A52",
+  "hostName" : "Artem's Mac mini",
+  "id" : "C4A1E8D2-5B3F-4E7A-9C0D-1E2F3A4B5C63",
+  "signaling" : {
+    "iceServers" : [
+      {
+        "urls" : [
+          "stun:turn.maccheri.example:3478"
+        ]
+      },
+      {
+        "credential" : "ZZ224NG03WwZNUC7kHDwTZ2AqA0=",
+        "urls" : [
+          "turn:turn.maccheri.example:3478?transport=udp",
+          "turn:turn.maccheri.example:3478?transport=tcp",
+          "turns:turn.maccheri.example:443?transport=tcp"
+        ],
+        "username" : "1792580400:C4A1E8D2-5B3F-4E7A-9C0D-1E2F3A4B5C63"
+      }
+    ],
+    "token" : "mcs_viewer_3kV9pQ2xL7nR4tY8wZ1b",
+    "url" : "wss://maccheri.example/v1/sessions/C4A1E8D2-5B3F-4E7A-9C0D-1E2F3A4B5C63/signal?role=viewer&token=mcs_viewer_3kV9pQ2xL7nR4tY8wZ1b"
+  },
+  "state" : "starting"
+}
