@@ -1,0 +1,8 @@
+{
+  "githubJobID" : 41234567890,
+  "image" : "macos-27-xcode-27.2",
+  "jitConfig" : "eyJydW5uZXIiOiJleGFtcGxlIn0=",
+  "jobID" : "9D8C7B6A-5F4E-4D3C-8B2A-1F0E9D8C7B74",
+  "repository" : "octo/repo",
+  "timeoutSeconds" : 3600
+}

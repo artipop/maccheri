@@ -1,0 +1,77 @@
+# Production stack on one server: control plane, Caddy (HTTPS, TURN over TLS on 443), coturn.
+#     cp .env.example .env && $EDITOR .env && docker compose up -d --build
+name: maccheri
+
+services:
+  controlplane:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PUBLIC_URL: https://${DOMAIN:?set DOMAIN in .env}
+      TURN_HOST: ${TURN_DOMAIN:?set TURN_DOMAIN in .env}
+      DATABASE_PATH: /data/maccheri.sqlite
+    volumes:
+      - controlplane-data:/data
+      - ./backups:/backups
+
+  caddy:
+    build: caddy
+    restart: unless-stopped
+    depends_on: [controlplane]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
+      TURN_DOMAIN: ${TURN_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  # Host networking: the relay port range would be slow to publish one by one.
+  # Open on the firewall: 3478/udp, 3478/tcp, TURN_MIN_PORT-TURN_MAX_PORT/udp.
+  coturn:
+    image: coturn/coturn:4.7
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TURN_SECRET: ${TURN_SECRET:?set TURN_SECRET in .env}
+      TURN_DOMAIN: ${TURN_DOMAIN}
+      TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-}
+      TURN_MIN_PORT: ${TURN_MIN_PORT:-49160}
+      TURN_MAX_PORT: ${TURN_MAX_PORT:-49999}
+      TURN_EXTRA_ARGS: ${TURN_EXTRA_ARGS:-}
+    entrypoint: ["/bin/sh", "-c"]
+    # TLS is terminated by Caddy; coturn only speaks plain TURN on 3478.
+    # Peers in private ranges are denied so the relay can't reach the server's own networks.
+    command:
+      - >-
+        exec turnserver -n --log-file=stdout --no-cli --no-tls --no-dtls
+        --listening-port=3478 --fingerprint
+        --use-auth-secret --static-auth-secret="$$TURN_SECRET" --realm="$$TURN_DOMAIN"
+        --min-port="$$TURN_MIN_PORT" --max-port="$$TURN_MAX_PORT"
+        $${TURN_EXTERNAL_IP:+--external-ip=$$TURN_EXTERNAL_IP}
+        --no-multicast-peers --stale-nonce=600 --user-quota=12 --total-quota=1200
+        --denied-peer-ip=0.0.0.0-0.255.255.255
+        --denied-peer-ip=10.0.0.0-10.255.255.255
+        --denied-peer-ip=100.64.0.0-100.127.255.255
+        --denied-peer-ip=127.0.0.0-127.255.255.255
+        --denied-peer-ip=169.254.0.0-169.254.255.255
+        --denied-peer-ip=172.16.0.0-172.31.255.255
+        --denied-peer-ip=192.168.0.0-192.168.255.255
+        --denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+        --denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+        $$TURN_EXTRA_ARGS
+
+volumes:
+  controlplane-data:
+  caddy-data:
+  caddy-config:

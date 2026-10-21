@@ -1,0 +1,21 @@
+{
+  "agentVersion" : "0.1.0",
+  "capacity" : {
+    "devices" : [
+      {
+        "deviceType" : "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+        "runtime" : "com.apple.CoreSimulator.SimRuntime.iOS-27-2"
+      }
+    ],
+    "freeSlots" : 0,
+    "images" : [
+      "macos-27-xcode-27.2"
+    ],
+    "labels" : [
+      "maccheri",
+      "macos-27",
+      "xcode-27.2"
+    ],
+    "warmVMs" : 1
+  }
+}

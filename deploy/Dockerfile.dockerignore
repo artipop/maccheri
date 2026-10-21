@@ -1,0 +1,10 @@
+# Context is the repository root; send only what the image needs.
+**
+!protocol/Package.swift
+!protocol/Sources/**
+!controlplane/Package.swift
+!controlplane/Package.resolved
+!controlplane/Sources/**
+!web/**
+web/node_modules
+web/dist
