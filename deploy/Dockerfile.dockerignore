@@ -2,9 +2,12 @@
 **
 !protocol/Package.swift
 !protocol/Sources/**
+!protocol/Tests/**
 !controlplane/Package.swift
 !controlplane/Package.resolved
 !controlplane/Sources/**
+# SwiftPM needs the test target directory to resolve the package.
+!controlplane/Tests/**
 !web/**
 web/node_modules
 web/dist

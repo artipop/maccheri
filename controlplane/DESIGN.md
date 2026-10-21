@@ -174,8 +174,7 @@ starting ──отчёт ready──▶ ready ──▶ ended / failed
 Ожидание: после неудачной попытки long-poll ждёт сигнала «появилась работа» (новая сессия или задание)
 или 1 с — и пробует снова, пока не выйдет время. Тогда `204`.
 
-Старый `/agent/v1/lease` работает как раньше (только CI), принимает и токены хостов, и `AGENT_TOKENS`
-из env. Уберём, когда A перейдёт на `/agent/v1/work`.
+Старый `/agent/v1/lease` (только CI, токены из env `AGENT_TOKENS`) убран: агент работает через `/agent/v1/work`.
 
 ## Фоновая проверка
 
@@ -250,7 +249,6 @@ credential = base64(HMAC-SHA1(TURN_SECRET, username))
 | `RUNNER_LABEL` | `maccheri` | |
 | `DEFAULT_IMAGE` | `macos-27-xcode-27.2` | |
 | `JOB_TIMEOUT_SECONDS` | 3600 | |
-| `AGENT_TOKENS` | — | только для старого `/agent/v1/lease` |
 
 ## Бэкап
 

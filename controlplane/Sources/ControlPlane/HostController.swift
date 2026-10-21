@@ -75,15 +75,9 @@ extension HostModel: Authenticatable {}
 
 /// `Authorization: Bearer <HostEnrollment.agentToken>`. Every agent call counts as a sign of life.
 struct AgentAuthMiddleware: AsyncMiddleware {
-    /// Also accept `AGENT_TOKENS` from the environment (legacy `/agent/v1/lease`); no host is logged in then.
-    var allowLegacyTokens = false
-
     func respond(to request: Request, chainingTo next: any AsyncResponder) async throws -> Response {
-        guard let token = request.headers.bearerAuthorization?.token else { throw Abort(.unauthorized) }
-        if allowLegacyTokens, request.maccheri.settings.legacyAgentTokens.contains(token) {
-            return try await next.respond(to: request)
-        }
-        guard let host = try await HostModel.query(on: request.db).filter(\.$agentTokenHash == Tokens.hash(token)).first()
+        guard let token = request.headers.bearerAuthorization?.token,
+              let host = try await HostModel.query(on: request.db).filter(\.$agentTokenHash == Tokens.hash(token)).first()
         else { throw Abort(.unauthorized) }
         host.lastSeenAt = request.maccheri.now
         try await host.update(on: request.db)

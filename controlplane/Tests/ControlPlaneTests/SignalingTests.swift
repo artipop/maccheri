@@ -82,6 +82,17 @@ final class SignalingTests: ControlPlaneTestCase {
         await assertRejected("\(base)?role=viewer&token=\(viewerToken)")
     }
 
+    func testErrorLogsLeaveTheTokenOut() async throws {
+        let (_, _, sessionID, _) = try await startedSession()
+        let capture = LogCapture()
+        app.logger = Logger(label: "test") { _ in capture }
+        try await app.test(.GET, "v1/sessions/\(sessionID.uuidString)/signal?role=viewer&token=mcs_leaked") { res async in
+            XCTAssertEqual(res.status, .forbidden)
+        }
+        XCTAssertFalse(capture.text.contains("mcs_leaked"), capture.text)
+        XCTAssertTrue(capture.text.contains("/signal"), capture.text)
+    }
+
     // MARK: - Helpers
 
     private func startedSession() async throws -> (UserToken, HostEnrollment, UUID, SignalingInfo) {
@@ -148,4 +159,22 @@ final class Peer: Sendable {
         }
         throw Abort(.requestTimeout, reason: "expected \(count) frames, got \(frames.withLockedValue { $0 })")
     }
+}
+
+/// Collects everything logged through it.
+final class LogCapture: LogHandler, @unchecked Sendable {
+    private let lines = NIOLockedValueBox<[String]>([])
+    var metadata: Logger.Metadata = [:]
+    var logLevel: Logger.Level = .trace
+
+    subscript(metadataKey key: String) -> Logger.Metadata.Value? {
+        get { metadata[key] }
+        set { metadata[key] = newValue }
+    }
+
+    func log(event: LogEvent) {
+        lines.withLockedValue { $0.append("\(event.message) \(event.metadata ?? [:])") }
+    }
+
+    var text: String { lines.withLockedValue { $0.joined(separator: "\n") } }
 }

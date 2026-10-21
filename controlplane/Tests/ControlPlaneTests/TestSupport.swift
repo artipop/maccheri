@@ -16,7 +16,6 @@ final class TestClock: Sendable {
 /// One app per test on a fresh SQLite file, no background sweep, 1 s long-poll.
 class ControlPlaneTestCase: XCTestCase {
     let webhookSecret = "s3cret"
-    let legacyAgentToken = "agent-token"
     let turnSecret = "fixture-turn-secret"
     var app: Application!
     let clock = TestClock()
@@ -34,7 +33,6 @@ class ControlPlaneTestCase: XCTestCase {
         settings.sweepSeconds = nil
         settings.turn = TURNSettings(host: "turn.maccheri.example", secret: turnSecret, port: 3478, tlsPort: 443)
         settings.webhookSecret = webhookSecret
-        settings.legacyAgentTokens = [legacyAgentToken]
         settings.defaultImage = "test-image"
         settings.jobTimeoutSeconds = 600
         return settings

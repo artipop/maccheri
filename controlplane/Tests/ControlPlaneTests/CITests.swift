@@ -5,7 +5,19 @@ import XCTVapor
 
 final class CITests: ControlPlaneTestCase {
     private var secret: String { webhookSecret }
-    private var agentToken: String { legacyAgentToken }
+    /// The host that polls for CI work in most tests.
+    private var host: HostEnrollment!
+
+    override func makeSettings() -> Settings {
+        var settings = super.makeSettings()
+        settings.longPollSeconds = 0 // answer at once when there is nothing
+        return settings
+    }
+
+    override func setUp() async throws {
+        try await super.setUp()
+        host = try await enrollHost("ci", owner: try await signUp("Owner"))
+    }
 
     func testRejectsBadSignature() async throws {
         try await app.test(.POST, "github/webhook", headers: ["X-GitHub-Event": "workflow_job", "X-Hub-Signature-256": "sha256=00"], body: ByteBuffer(string: "{}")) { res async throws in
@@ -28,7 +40,7 @@ final class CITests: ControlPlaneTestCase {
         XCTAssertNil(second)
 
         try await app.test(.POST, "agent/v1/jobs/\(lease!.jobID.uuidString)/complete", beforeRequest: { req async throws in
-            req.headers.bearerAuthorization = .init(token: agentToken)
+            req.headers.bearerAuthorization = .init(token: host.agentToken)
             try req.content.encode(CompleteRequest(outcome: .finished, durationSeconds: 12))
         }) { res async throws in
             XCTAssertEqual(res.status, .noContent)
@@ -57,12 +69,7 @@ final class CITests: ControlPlaneTestCase {
     func testFailedProvisioningRequeues() async throws {
         await provisioner.failNext()
         try await sendWorkflowJob(action: "queued", id: 11, labels: ["maccheri"])
-        try await app.test(.POST, "agent/v1/lease", beforeRequest: { req async throws in
-            req.headers.bearerAuthorization = .init(token: agentToken)
-            try req.content.encode(LeaseRequest(labels: ["maccheri"], freeSlots: 1))
-        }) { res async throws in
-            XCTAssertEqual(res.status, .badGateway)
-        }
+        try await assertEqual(try await status(.POST, "agent/v1/work", LeaseRequest(labels: ["maccheri"], freeSlots: 1), token: host.agentToken), .badGateway)
         let lease = try await leaseJob(labels: ["maccheri"])
         XCTAssertEqual(lease?.githubJobID, 11)
     }
@@ -107,9 +114,9 @@ final class CITests: ControlPlaneTestCase {
     }
 
     func testAgentNeedsToken() async throws {
-        try await app.test(.POST, "agent/v1/lease") { res async throws in
-            XCTAssertEqual(res.status, .unauthorized)
-        }
+        try await assertEqual(try await status(.POST, "agent/v1/work", LeaseRequest(labels: ["maccheri"], freeSlots: 1), token: nil), .unauthorized)
+        try await assertEqual(try await status(.POST, "agent/v1/lease", LeaseRequest(labels: ["maccheri"], freeSlots: 1), token: host.agentToken), .notFound,
+                              "the CI-only lease is gone")
     }
 
     func testJWTShape() throws {
@@ -147,15 +154,7 @@ final class CITests: ControlPlaneTestCase {
     }
 
     private func leaseJob(labels: [String]) async throws -> JobLease? {
-        var lease: JobLease?
-        try await app.test(.POST, "agent/v1/lease", beforeRequest: { req async throws in
-            req.headers.bearerAuthorization = .init(token: agentToken)
-            try req.content.encode(LeaseRequest(labels: labels, freeSlots: 1))
-        }) { res async throws in
-            if res.status == .ok { lease = try res.content.decode(JobLease.self) }
-            else { XCTAssertEqual(res.status, .noContent) }
-        }
-        return lease
+        try await work(host, labels: labels)?.ci
     }
 }
 
