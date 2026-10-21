@@ -63,12 +63,14 @@ public final class WorkDirectoryLock: Sendable {
     public init(workDirectory: URL) throws {
         try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
         let path = workDirectory.appending(path: ".lock").path
-        fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
+        // Assign only on success: a throwing init with every property set still runs deinit.
+        let fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
         guard fd >= 0 else { throw AgentError.workDirectoryBusy(path) }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
             close(fd)
             throw AgentError.workDirectoryBusy(path)
         }
+        self.fd = fd
     }
 
     deinit {
