@@ -46,6 +46,19 @@ VMPool: warm guest of the right image, or a free slot, or evict a warm guest of 
   `<work>/.lock` and, on start, deletes every UUID-named directory there: whatever a crashed agent
   left behind. Quitting the app or Ctrl-C on the CLI stops the VMs and deletes their clones.
 
+## End-to-end run (2026-10-21)
+
+With `scripts/fake-controlplane.py` (the agent half of the API plus a host-side signaling socket),
+`maccheri-agent run --stub-peer` and C's image `macos-27-xcode-27.2-v1`:
+
+- heartbeat: `freeSlots 0, warmVMs 1`, labels and devices from `maccheri.json`;
+- simulator session: `ready` 13 s after the lease, from the warm VM; the stub peer reached simstream
+  through the loopback forward; `bye` on signaling → `ended`, VM and clone gone, a new warm VM booted;
+- CI job (fake JIT config: the runner fails, the guest powers off anyway): `finished` after 69 s;
+- SIGTERM: warm VM stopped, `work/` empty.
+
+Only images with `maccheri.json` are offered to the control plane: the others have no guest daemon.
+
 ## Guest network: user-space NAT
 
 The guest must reach the internet but not the owner's LAN (RFC 1918, link-local), nor the Mac itself.

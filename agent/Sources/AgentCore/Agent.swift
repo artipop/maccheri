@@ -162,7 +162,12 @@ public actor Agent {
             let poll = Task { [controlPlane] in try await controlPlane.work(request) }
             self.poll = poll
             do {
-                let lease = try await poll.value
+                // The poll is its own task (pausing cancels just the poll), so pass stopping on.
+                let lease = try await withTaskCancellationHandler {
+                    try await poll.value
+                } onCancel: {
+                    poll.cancel()
+                }
                 self.poll = nil
                 setConnection(.online)
                 if let lease { await dispatch(lease) }
@@ -178,7 +183,7 @@ public actor Agent {
 
     private func capacity() async -> HostCapacity {
         let pool = await pool.status
-        let images = await self.pool.images
+        let images = Self.servable(await self.pool.images)
         return HostCapacity(
             freeSlots: paused ? 0 : pool.freeSlots,
             warmVMs: paused ? 0 : pool.warm,
@@ -189,15 +194,20 @@ public actor Agent {
     }
 
     private func labels() async -> [String] {
-        Self.labels(await pool.images)
+        Self.labels(Self.servable(await pool.images))
+    }
+
+    /// Only images built for Maccheri (with `maccheri.json`, so with the guest daemon) take work.
+    static func servable(_ images: [ImageInfo]) -> [ImageInfo] {
+        images.filter { $0.metadata != nil }
     }
 
     static func labels(_ images: [ImageInfo]) -> [String] {
         var labels = [String]()
-        for label in images.flatMap({ $0.metadata?.labels ?? HostInventory.defaultLabels }) where !labels.contains(label) {
+        for label in images.flatMap({ $0.metadata?.labels ?? [] }) where !labels.contains(label) {
             labels.append(label)
         }
-        return labels.isEmpty ? HostInventory.defaultLabels : labels
+        return labels
     }
 
     static func devices(_ images: [ImageInfo]) -> [DeviceSpec] {

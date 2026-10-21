@@ -112,8 +112,11 @@ actor FakeControlPlane: ControlPlane {
     var reports: [UUID: [SessionStateReport]] = [:]
     var ended: Set<UUID> = []
     var goneSessions: Set<UUID> = []
+    /// How long an empty long-poll is held open.
+    var pollDelay: Duration = .milliseconds(20)
 
     func add(_ lease: WorkLease) { leases.append(lease) }
+    func setPollDelay(_ delay: Duration) { pollDelay = delay }
     func endSession(_ id: UUID) { ended.insert(id) }
     func markGone(_ id: UUID) { goneSessions.insert(id) }
 
@@ -125,7 +128,7 @@ actor FakeControlPlane: ControlPlane {
     func work(_ request: LeaseRequest) async throws -> WorkLease? {
         workRequests.append(request)
         if !leases.isEmpty { return leases.removeFirst() }
-        try await Task.sleep(for: .milliseconds(20))
+        try await Task.sleep(for: pollDelay)
         return nil
     }
 
@@ -233,7 +236,7 @@ func ciLease(timeout: Int = 60) -> (UUID, WorkLease) {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     let images = root.appending(path: "images")
-    _ = try makeImage(in: images, name: "macos")
+    _ = try makeImage(in: images, name: "macos", metadata: Harness.simulatorImage)
     let store = ImageStore(imagesDirectory: images, workDirectory: root.appending(path: "work"))
 
     let small = VMPool(store: store, runner: FakeRunner(), settings: PoolSettings(maxVMs: 5, warmVMs: 0, memoryBudget: 64 << 30))
@@ -274,7 +277,7 @@ func ciLease(timeout: Int = 60) -> (UUID, WorkLease) {
 @Test func evictsWarmGuestOfAnotherImage() async throws {
     let harness = try await Harness()
     defer { harness.cleanUp() }
-    _ = try makeImage(in: harness.store.imagesDirectory, name: "other")
+    _ = try makeImage(in: harness.store.imagesDirectory, name: "other", metadata: Harness.simulatorImage)
     await harness.pool.rescanImages()
     #expect(await eventually { await harness.pool.status.warmBooted == 1 })
 
@@ -430,5 +433,18 @@ func ciLease(timeout: Int = 60) -> (UUID, WorkLease) {
     #expect(await eventually { await harness.pool.status.warmBooted == 1 })
     running.cancel()
     await running.value
+    #expect(harness.clones.isEmpty)
+}
+
+@Test func stopsWithoutWaitingForTheLongPoll() async throws {
+    let harness = try await Harness()
+    defer { harness.cleanUp() }
+    await harness.controlPlane.setPollDelay(.seconds(25))
+    let running = Task { await harness.agent.run() }
+    #expect(await eventually { await harness.controlPlane.workRequests.count == 1 })
+    let started = ContinuousClock.now
+    running.cancel()
+    await running.value
+    #expect(ContinuousClock.now - started < .seconds(2))
     #expect(harness.clones.isEmpty)
 }

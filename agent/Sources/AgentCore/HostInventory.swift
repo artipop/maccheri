@@ -39,11 +39,6 @@ public enum HostInventory {
         Host.current().localizedName ?? sysctlString("kern.hostname") ?? "Mac"
     }
 
-    /// Labels for images without metadata.
-    public static var defaultLabels: [String] {
-        ["maccheri", "macos-\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion)"]
-    }
-
     static func sysctlString(_ name: String) -> String? {
         var size = 0
         guard sysctlbyname(name, nil, &size, nil, 0) == 0, size > 0 else { return nil }

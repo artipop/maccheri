@@ -122,7 +122,7 @@ public actor VMPool {
 
     private var warmImageName: String? {
         if let name = settings.warmImage, images.contains(where: { $0.name == name }) { return name }
-        return (images.first { !($0.metadata?.devices.isEmpty ?? true) } ?? images.first)?.name
+        return (images.first { !($0.metadata?.devices.isEmpty ?? true) } ?? images.first { $0.metadata != nil })?.name
     }
 
     /// Called on every capacity change (on the pool's executor).
