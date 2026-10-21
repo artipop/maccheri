@@ -70,6 +70,7 @@ public final class HostPeer: @unchecked Sendable {
     private var disconnectTimer: DispatchWorkItem?
     private var finished = false
     private var continuation: CheckedContinuation<EndReason, Error>?
+    private var stoppedEarly: String?
     private var stats = (frames: 0, bytes: 0, dropped: 0)
     private var statsTimer: DispatchSourceTimer?
 
@@ -98,6 +99,11 @@ public final class HostPeer: @unchecked Sendable {
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 queue.async {
+                    // Stopped (or cancelled) before it could start: nothing to set up.
+                    if let reason = self.stoppedEarly {
+                        guest.cancel()
+                        return continuation.resume(returning: .stopped(reason))
+                    }
                     self.continuation = continuation
                     do {
                         try self.start(guest: guest)
@@ -115,6 +121,11 @@ public final class HostPeer: @unchecked Sendable {
     /// Ends the session from the host's side: sends `bye` and makes ``run()`` return.
     public func stop(reason: String?) {
         queue.async {
+            guard self.continuation != nil else {
+                // run() hasn't started yet (or isn't running): it returns as soon as it does.
+                if !self.finished { self.stoppedEarly = reason ?? "stopped" }
+                return
+            }
             guard !self.finished else { return }
             self.signal(.bye(reason: reason))
             self.finish(.success(.stopped(reason)))

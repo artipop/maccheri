@@ -219,6 +219,27 @@ struct HostPeerTests {
         }
     }
 
+    @Test func cancelledBeforeItStartsReturnsAtOnce() async throws {
+        let guest = try FakeGuest()
+        let port = try await guest.start()
+        let (hostSide, _) = LocalSignaling.pair()
+        let peer = HostPeer(transport: hostSide, iceServers: [], sessionID: UUID()) {
+            // The agent's connectToGuest may take a while and finish despite the session being
+            // cancelled meanwhile; run() then must not start the peer and wait forever.
+            try? await Task.sleep(for: .milliseconds(200))
+            return NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+        }
+        let run = Task { try await peer.run() }
+        try await Task.sleep(for: .milliseconds(50))
+        run.cancel()
+        // Polled rather than awaited: before the fix run() never returned, and the test must fail, not hang.
+        let result = Locked<HostPeer.EndReason?>(nil)
+        Task { result.set(try? await run.value) }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while result.value == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(result.value == .stopped("cancelled"))
+    }
+
     @Test func iceServerURLsForLibDataChannel() {
         let urls = RTCPeerConnection.iceServerURLs([
             (["stun:turn.example.com:3478", "turn:turn.example.com:3478?transport=udp", "turns:turn.example.com:5349"], "1761000000:5D6C", "a/b+c="),
@@ -237,6 +258,14 @@ struct HostPeerTests {
         #expect(HostPeer.acceptsPlayoutDelay(answer))
         #expect(HostPeer.videoMediaDescription().hasPrefix("m=video 9 UDP/TLS/RTP/SAVPF 96 97 98\r\n"))
     }
+}
+
+final class Locked<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: T
+    init(_ value: T) { _value = value }
+    var value: T { lock.withLock { _value } }
+    func set(_ value: T) { lock.withLock { _value = value } }
 }
 
 private func guestConnectionClose(_ guest: FakeGuest) {
