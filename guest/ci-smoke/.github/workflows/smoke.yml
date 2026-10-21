@@ -1,0 +1,34 @@
+# Smoke test for a maccheri pool: one job in a throwaway VM on a team member's Mac.
+name: maccheri smoke
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: [self-hosted, maccheri]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun simctl list runtimes
+      - name: Pick a simulator
+        run: |
+          UDID="$(xcrun simctl list -j devices available | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid')"
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+      - name: Build and test on the simulator
+        run: xcodebuild test -scheme Smoke -destination "id=$UDID" -quiet
+      - name: simctl smoke
+        run: |
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl launch "$UDID" com.apple.Preferences
+          sleep 3
+          xcrun simctl io "$UDID" screenshot screenshot.png
+          test -s screenshot.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshot
+          path: screenshot.png
