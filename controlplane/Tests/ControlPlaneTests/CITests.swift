@@ -3,28 +3,9 @@ import MaccheriProtocol
 import XCTVapor
 @testable import ControlPlane
 
-final class ControlPlaneTests: XCTestCase {
-    private let secret = "s3cret"
-    private let agentToken = "agent-token"
-    private var app: Application!
-    private let provisioner = FakeProvisioner()
-
-    override func setUp() async throws {
-        app = try await Application.make(.testing)
-        try configure(app, settings: Settings(
-            webhookSecret: secret,
-            agentTokens: [agentToken],
-            runnerLabel: "maccheri",
-            defaultImage: "test-image",
-            jobTimeoutSeconds: 600,
-            github: nil
-        ), provisioner: provisioner)
-    }
-
-    override func tearDown() async throws {
-        try await app.asyncShutdown()
-        app = nil
-    }
+final class CITests: ControlPlaneTestCase {
+    private var secret: String { webhookSecret }
+    private var agentToken: String { legacyAgentToken }
 
     func testRejectsBadSignature() async throws {
         try await app.test(.POST, "github/webhook", headers: ["X-GitHub-Event": "workflow_job", "X-Hub-Signature-256": "sha256=00"], body: ByteBuffer(string: "{}")) { res async throws in
@@ -86,6 +67,45 @@ final class ControlPlaneTests: XCTestCase {
         XCTAssertEqual(lease?.githubJobID, 11)
     }
 
+    func testJobsSurviveRestart() async throws {
+        try await sendWorkflowJob(action: "queued", id: 12, labels: ["maccheri"])
+        try await restart()
+        let lease = try await leaseJob(labels: ["maccheri"])
+        XCTAssertEqual(lease?.githubJobID, 12)
+    }
+
+    func testWorkHandsOutCIAfterSimulator() async throws {
+        let owner = try await signUp("Owner")
+        let host = try await enrollHost("mini", owner: owner)
+        try await sendWorkflowJob(action: "queued", id: 13, labels: ["self-hosted", "maccheri"])
+        let session = try await createSession(owner)
+
+        let first = try await work(host)
+        XCTAssertEqual(first?.simulator?.sessionID, session.id, "a waiting person goes before CI")
+        let second = try await work(host)
+        XCTAssertEqual(second?.ci?.githubJobID, 13)
+        XCTAssertEqual(second?.ci?.jitConfig, "jit-for-octo/repo")
+
+        try await app.test(.POST, "agent/v1/jobs/\(second!.ci!.jobID.uuidString)/complete", beforeRequest: { req async throws in
+            req.headers.bearerAuthorization = .init(token: host.agentToken)
+            try req.content.encode(CompleteRequest(outcome: .finished, durationSeconds: 30))
+        }) { res async throws in
+            XCTAssertEqual(res.status, .noContent)
+        }
+    }
+
+    func testJobOfOfflineHostIsRequeued() async throws {
+        let owner = try await signUp("Owner")
+        let host = try await enrollHost("mini", owner: owner)
+        try await sendWorkflowJob(action: "queued", id: 14, labels: ["maccheri"])
+        try await assertEqual(try await work(host)?.ci?.githubJobID, 14)
+
+        clock.advance(seconds: 60)
+        try await sweep()
+        let other = try await enrollHost("studio", owner: owner)
+        try await assertEqual(try await work(other)?.ci?.githubJobID, 14)
+    }
+
     func testAgentNeedsToken() async throws {
         try await app.test(.POST, "agent/v1/lease") { res async throws in
             XCTAssertEqual(res.status, .unauthorized)
@@ -139,25 +159,8 @@ final class ControlPlaneTests: XCTestCase {
     }
 }
 
-actor FakeProvisioner: RunnerProvisioner {
-    struct Call: Equatable { var repository: String; var labels: [String] }
-    private(set) var calls: [Call] = []
-    private var shouldFail = false
-
-    func failNext() { shouldFail = true }
-
-    func jitConfig(installationID: Int64, repository: String, runnerName: String, labels: [String]) async throws -> String {
-        if shouldFail {
-            shouldFail = false
-            throw Abort(.internalServerError)
-        }
-        calls.append(Call(repository: repository, labels: labels))
-        return "jit-for-\(repository)"
-    }
-}
-
 import _CryptoExtras
 
 extension _RSA.Signing.PrivateKey {
-    nonisolated(unsafe) static let testKey = try! _RSA.Signing.PrivateKey(keySize: .bits2048)
+    static let testKey = try! _RSA.Signing.PrivateKey(keySize: .bits2048)
 }
