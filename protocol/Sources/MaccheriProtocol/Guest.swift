@@ -36,3 +36,22 @@ public struct GuestSimulatorSession: Codable, Sendable, Equatable {
         self.simstreamPort = simstreamPort
     }
 }
+
+/// `maccheri.json` next to `config.json` in a base image directory: what the image offers.
+/// The image build (C) writes it; the agent (A) reads it to fill ``HostCapacity``.
+public struct ImageMetadata: Codable, Sendable, Equatable {
+    public static let fileName = "maccheri.json"
+
+    /// Runner labels, e.g. `["maccheri", "macos-27", "xcode-27.2"]`.
+    public var labels: [String]
+    /// Simulator devices created in the image.
+    public var devices: [DeviceSpec]
+    /// Version of `maccheri-guestd` baked into the image.
+    public var guestVersion: String
+
+    public init(labels: [String], devices: [DeviceSpec], guestVersion: String) {
+        self.labels = labels
+        self.devices = devices
+        self.guestVersion = guestVersion
+    }
+}

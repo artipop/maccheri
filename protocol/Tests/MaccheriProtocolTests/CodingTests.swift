@@ -64,3 +64,9 @@ private let signaling = SignalingInfo(
     let response = HeartbeatResponse(endedSessions: [UUID()])
     #expect(try roundTrip(response) == response)
 }
+
+@Test func imageMetadataWireFormat() throws {
+    let json = #"{"labels":["maccheri"],"devices":[{"deviceType":"t","runtime":"r"}],"guestVersion":"1"}"#
+    let metadata = try JSONDecoder().decode(ImageMetadata.self, from: Data(json.utf8))
+    #expect(metadata == ImageMetadata(labels: ["maccheri"], devices: [DeviceSpec(deviceType: "t", runtime: "r")], guestVersion: "1"))
+}
