@@ -216,7 +216,7 @@ function runSession(info: SessionInfo, transport: VideoTransport) {
       status.textContent = `${text}: ${message}`
       if (state === 'launched') setTimeout(() => { if (status.textContent?.startsWith(text)) status.textContent = '' }, 4000)
     },
-  })
+  }, params.get('relay') === '1')
 
   // Layout: fit the (possibly rotated) screen into the stage.
   const rotation = (): number => ({ portrait: 0, landscapeLeft: -90, portraitUpsideDown: 180, landscapeRight: 90 })[orientation]
