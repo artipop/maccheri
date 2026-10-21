@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>Maccheri</title>
+    <script>
+      // An invite link, /invite/<code>, as /?invite=<code>: asset URLs are relative to the page, so
+      // under /invite/ they would miss. Runs before the bundle is requested.
+      {
+        const invite = location.pathname.match(/^(.*\/)invite\/([^/]+)\/?$/)
+        if (invite) location.replace(invite[1] + '?invite=' + invite[2])
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>

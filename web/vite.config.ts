@@ -20,7 +20,14 @@ export default defineConfig({
   server: {
     host: true,
     https,
-    proxy: api ? { '/v1': { target: api, ws: true, changeOrigin: true }, '/agent': { target: api, changeOrigin: true } } : undefined,
+    proxy: api
+      ? {
+          '/v1': { target: api, ws: true, changeOrigin: true },
+          '/agent': { target: api, changeOrigin: true },
+          '/auth': { target: api, changeOrigin: true },
+          '/github': { target: api, changeOrigin: true },
+        }
+      : undefined,
   },
   build: { target: 'es2022', outDir: 'dist', emptyOutDir: true },
   test: { environment: 'node' },
