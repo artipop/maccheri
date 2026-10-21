@@ -21,6 +21,7 @@
 | A | Maccheri.app (хост), агент, пул VM, сеть гостя | `hostapp/`, `agent/` |
 | B | Control plane, деплой (Caddy, coturn) | `controlplane/`, `deploy/` |
 | C | Базовый образ, служба в госте, сквозной прогон CI | `images/`, `guest/` |
+| E | Control plane на Go (`docs/tasks/e-controlplane-go.md`); на шаге подмены — `deploy/` и удаление `controlplane/` | `controlplane-go/` |
 | D | P2P-транспорт (WebRTC), simstream, веб-клиент, Mac Viewer (инструмент разработки) | `simstream/`, `web/`, `viewer/`, `protocol/Sources/SimStreamProtocol/` |
 | Координатор (сессия `maccheri-07`; имя меняется после перезапуска — сверяйся с `ListAgents`) | Контракты, слияние в `main` | `protocol/Sources/MaccheriProtocol/`, `docs/` |
 
