@@ -50,6 +50,21 @@ final class StreamServer: @unchecked Sendable {
     /// `SIMSTREAM_TRACE=1`: one line per frame that carries a new touch, with where the time went.
     private let trace = ProcessInfo.processInfo.environment["SIMSTREAM_TRACE"] == "1"
     private var tracedAck: UInt32 = 0
+    private var tracedBlank = false
+
+    static func isBlank(_ surface: IOSurfaceRef) -> Bool {
+        IOSurfaceLock(surface, .readOnly, nil)
+        defer { IOSurfaceUnlock(surface, .readOnly, nil) }
+        let base = IOSurfaceGetBaseAddress(surface), rowBytes = IOSurfaceGetBytesPerRow(surface)
+        let w = IOSurfaceGetWidth(surface), h = IOSurfaceGetHeight(surface)
+        for gy in 1..<16 {
+            for gx in 1..<8 {
+                let p = base.load(fromByteOffset: (h * gy / 16) * rowBytes + (w * gx / 8) * 4, as: UInt32.self)
+                if p & 0xe0e0e0 != 0 { return false }
+            }
+        }
+        return true
+    }
 
     /// Bumped for every new picture; idle refinement stops when it changes.
     private var generation = 0
@@ -261,6 +276,14 @@ final class StreamServer: @unchecked Sendable {
         // has redrawn for it yet: a frame already in flight can carry it (at most a frame early).
         let ack = queue.sync { acked }
         guard let buffer = encoder.scale(surface) else { return }
+        if trace {
+            let blank = Self.isBlank(surface)
+            if blank != tracedBlank {
+                tracedBlank = blank
+                print(String(format: "trace %.3f source surface %@ (%dx%d, seed %u)", Double(start) / 1e6, blank ? "BLANK" : "ok",
+                             IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface), IOSurfaceGetSeed(surface)))
+            }
+        }
         if trace, ack.id != tracedAck {
             tracedAck = ack.id
             let ms = { (a: UInt64, b: UInt64) in String(format: "%.1f", Double(Int64(b) - Int64(a)) / 1000) }

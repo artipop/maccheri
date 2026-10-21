@@ -1,5 +1,6 @@
 // simstream-bench --host 127.0.0.1 [--port 7300] [--taps 60] [--hold 60]
 // simstream-bench --host … --tap X,Y | --drag X,Y1,Y2     one gesture, for checking input by hand
+// simstream-bench --host … --soak SECONDS                   random scrolling; counts all-black frames
 //
 // Headless simstream client for latency runs. With TapProbe in the foreground (it flips the screen
 // black/white on every touch-down) it taps the screen centre N times and reports click → decoded
@@ -68,6 +69,47 @@ guard firstFrame.wait(timeout: .now() + 10) == .success else {
     exit(1)
 }
 usleep(500_000)
+
+/// Whether a sparse grid of pixels is all (near) black: a blank frame, which TapProbe aside never
+/// shows up in real apps.
+func isBlank(_ image: CVPixelBuffer) -> Bool {
+    CVPixelBufferLockBaseAddress(image, .readOnly)
+    defer { CVPixelBufferUnlockBaseAddress(image, .readOnly) }
+    let base = CVPixelBufferGetBaseAddress(image)!, rowBytes = CVPixelBufferGetBytesPerRow(image)
+    let w = CVPixelBufferGetWidth(image), h = CVPixelBufferGetHeight(image)
+    for gy in 1..<16 {
+        for gx in 1..<8 {
+            let p = base.load(fromByteOffset: (h * gy / 16) * rowBytes + (w * gx / 8) * 4, as: UInt32.self)
+            if (p & 0xff) > 24 || (p >> 8 & 0xff) > 24 || (p >> 16 & 0xff) > 24 { return false }
+        }
+    }
+    return true
+}
+
+if let seconds = arg("--soak").flatMap(Double.init) {
+    var blanks: [(Int, Double)] = []
+    var total = 0
+    client.onFrame = { frame in
+        let blank = isBlank(frame.image)
+        lock.withLock {
+            total += 1
+            if blank { blanks.append((total, frame.decodedAtMs)) }
+        }
+    }
+    let end = uptimeMs() + seconds * 1000
+    while uptimeMs() < end {
+        let (y1, y2) = Bool.random() ? (0.75, 0.35) : (0.35, 0.75)
+        client.touch(.began, x: 0.5, y: y1)
+        for step in 1...20 {
+            usleep(16_000)
+            client.touch(.moved, x: 0.5, y: y1 + (y2 - y1) * Double(step) / 20)
+        }
+        client.touch(.ended, x: 0.5, y: y2)
+        usleep(useconds_t(Int.random(in: 200_000...900_000)))
+    }
+    lock.withLock { print("frames \(total), blank \(blanks.count): \(blanks.prefix(20).map { "#\($0.0)" }.joined(separator: " "))") }
+    exit(0)
+}
 
 /// One tap or a vertical drag at normalised coordinates, then exit.
 func gesture(_ spec: String, drag: Bool) -> Never {

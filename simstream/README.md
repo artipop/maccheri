@@ -82,5 +82,9 @@ swift run -c release --package-path simstream simstream-bench --host … --drag 
   подпись (`Code Signature Invalid`). Копировать во временный файл и делать `mv`, как в `run-in-guest.sh`.
 - Аппаратного скейлера в госте нет (`IOServiceMatching failed for AppleM2ScalerParavirtDriver`),
   масштабирование выполняется без него. Оно занимает около 2 мс, это приемлемо.
+- Чёрный экран на 1–3,5 с при холодном запуске приложения (Safari, Карты, Календарь) рисует сам
+  симулятор в госте: исходная IOSurface чёрная, `simctl io screenshot` в этот момент тоже показывает
+  чёрное. К потоку это отношения не имеет. Проверка: `SIMSTREAM_TRACE=1` пишет в лог переходы
+  `source surface BLANK/ok`, а `simstream-bench --soak 60` считает чёрные декодированные кадры.
 - Приватные API привязаны к Xcode 27.2. При обновлении Xcode проверить сигнатуры
   в `SimulatorBridge/PrivateAPI.swift`.
