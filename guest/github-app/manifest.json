@@ -1,0 +1,17 @@
+{
+  "name": "maccheri",
+  "url": "https://example.com",
+  "description": "Runs GitHub Actions jobs in throwaway macOS VMs on the team's Macs.",
+  "public": false,
+  "hook_attributes": {
+    "url": "https://example.com/github/webhook",
+    "active": true
+  },
+  "redirect_url": "http://localhost:8765/callback",
+  "default_permissions": {
+    "metadata": "read",
+    "actions": "read",
+    "administration": "write"
+  },
+  "default_events": ["workflow_job"]
+}
