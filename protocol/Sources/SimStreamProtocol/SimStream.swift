@@ -1,15 +1,20 @@
 import Foundation
 
-/// Remote simulator stream, version 1.
+/// Remote simulator stream, version 2.
 ///
 /// One TCP connection carries everything. Each message is `UInt32 length` (big-endian, counts the
 /// type byte and the payload), `UInt8 type`, payload. Integers are big-endian, floats are IEEE 754
 /// bit patterns, strings and blobs carry a `UInt16` length.
 ///
+/// Over WebRTC (host peer ⇄ browser) the same messages travel without the length prefix, one per
+/// data channel message (``SimStreamMessage/encodedBody()``): `control` (reliable, ordered) carries
+/// everything except video; video goes either as an RTP track plus ``FrameInfo`` on `control`, or
+/// as ``VideoChunk``s on the `video` channel (``StreamConfig``).
+///
 /// The client measures click → frame on its own clock: it remembers when it sent touch N and waits
 /// for a ``VideoFrame`` whose ``VideoFrame/inputAck`` is ≥ N. No clock sync between machines.
 public enum SimStream {
-    public static let version: UInt16 = 1
+    public static let version: UInt16 = 2
     public static let defaultPort: UInt16 = 7300
     /// Anything bigger is a corrupt stream, not a frame.
     public static let maxMessageSize = 16 << 20
@@ -27,6 +32,140 @@ public enum SimStreamMessage: Sendable, Equatable {
     /// Either direction; the peer answers with `pong` carrying the same value.
     case ping(UInt64)
     case pong(UInt64)
+    /// Client → server: a hardware key (USB HID usage page 7).
+    case key(KeyEvent)
+    /// Client → server: a device button.
+    case button(ButtonEvent)
+    /// Client → server: rotate the device.
+    case orientation(Orientation)
+    /// Client → server: an app upload starts; `.app` zipped, `size` bytes follow in `installChunk`s.
+    case installBegin(name: String, size: UInt64)
+    case installChunk(Data)
+    /// Client → server: all chunks sent; install and launch.
+    case installEnd
+    /// Server → client: progress and outcome of the upload.
+    case installStatus(InstallStatus)
+    /// Viewer → host peer (not forwarded to the guest): how to deliver video.
+    case streamConfig(StreamConfig)
+    /// Host peer → viewer, track mode: what the guest said about the frame with this RTP timestamp.
+    case frameInfo(FrameInfo)
+    /// Host peer → viewer, data channel mode: a slice of one encoded `video` message body.
+    case videoChunk(VideoChunk)
+}
+
+/// A key press or release. `usage` is the USB HID usage on the keyboard page (0x07), e.g. 0x04 = A,
+/// 0x28 = Return, 0xE1 = left shift; the same codes browsers' `KeyboardEvent.code` maps to.
+public struct KeyEvent: Sendable, Equatable {
+    public var usage: UInt16
+    public var down: Bool
+
+    public init(usage: UInt16, down: Bool) {
+        self.usage = usage
+        self.down = down
+    }
+}
+
+public struct ButtonEvent: Sendable, Equatable {
+    public enum Button: UInt8, Sendable, CaseIterable {
+        case home = 0
+        case lock = 1
+        case siri = 2
+        case volumeUp = 3
+        case volumeDown = 4
+    }
+
+    public var button: Button
+    public var down: Bool
+
+    public init(button: Button, down: Bool) {
+        self.button = button
+        self.down = down
+    }
+}
+
+/// UIDeviceOrientation values.
+public enum Orientation: UInt8, Sendable, CaseIterable {
+    case portrait = 1
+    case portraitUpsideDown = 2
+    /// Home button (or bottom edge) on the right.
+    case landscapeLeft = 3
+    case landscapeRight = 4
+}
+
+public struct InstallStatus: Sendable, Equatable {
+    public enum State: UInt8, Sendable {
+        case receiving = 0
+        case installing = 1
+        case launched = 2
+        case failed = 3
+    }
+
+    public var state: State
+    /// Bundle id once known, or the error.
+    public var message: String
+
+    public init(state: State, message: String) {
+        self.state = state
+        self.message = message
+    }
+}
+
+public struct StreamConfig: Sendable, Equatable {
+    public enum VideoTransport: UInt8, Sendable {
+        /// RTP H.264 track, the browser's `<video>`; per-frame metadata as ``FrameInfo``.
+        case track = 0
+        /// ``VideoChunk``s on the `video` data channel; the browser decodes with WebCodecs.
+        case dataChannel = 1
+    }
+
+    public var video: VideoTransport
+
+    public init(video: VideoTransport) {
+        self.video = video
+    }
+}
+
+public struct FrameInfo: Sendable, Equatable {
+    /// 90 kHz RTP timestamp of the frame, as `requestVideoFrameCallback` reports it.
+    public var rtpTimestamp: UInt32
+    public var isKeyframe: Bool
+    public var inputAck: UInt32
+    public var ackAgeMicros: UInt32
+    public var encodeMicros: UInt32
+
+    public init(rtpTimestamp: UInt32, isKeyframe: Bool, inputAck: UInt32, ackAgeMicros: UInt32, encodeMicros: UInt32) {
+        self.rtpTimestamp = rtpTimestamp
+        self.isKeyframe = isKeyframe
+        self.inputAck = inputAck
+        self.ackAgeMicros = ackAgeMicros
+        self.encodeMicros = encodeMicros
+    }
+}
+
+/// Frames are bigger than a data channel message may be in every browser, so they are sliced.
+/// Slices of one frame are sent in order; a frame whose slices don't all arrive is lost.
+public struct VideoChunk: Sendable, Equatable {
+    /// Increases by one per frame.
+    public var frame: UInt32
+    public var index: UInt16
+    public var count: UInt16
+    public var bytes: Data
+
+    public init(frame: UInt32, index: UInt16, count: UInt16, bytes: Data) {
+        self.frame = frame
+        self.index = index
+        self.count = count
+        self.bytes = bytes
+    }
+
+    /// Slices a `video` message body into chunks of at most `size` payload bytes.
+    public static func slice(_ body: Data, frame: UInt32, size: Int) -> [VideoChunk] {
+        let count = max(1, (body.count + size - 1) / size)
+        return (0..<count).map { i in
+            let start = body.startIndex + i * size
+            return VideoChunk(frame: frame, index: UInt16(i), count: UInt16(count), bytes: Data(body[start..<min(start + size, body.endIndex)]))
+        }
+    }
 }
 
 public struct Hello: Sendable, Equatable {
@@ -121,6 +260,16 @@ enum MessageType: UInt8 {
     case requestKeyframe = 4
     case ping = 5
     case pong = 6
+    case key = 7
+    case button = 8
+    case orientation = 9
+    case installBegin = 10
+    case installChunk = 11
+    case installEnd = 12
+    case installStatus = 13
+    case streamConfig = 14
+    case frameInfo = 15
+    case videoChunk = 16
 }
 
 extension SimStreamMessage {
@@ -163,11 +312,54 @@ extension SimStreamMessage {
         case .pong(let v):
             w.u8(MessageType.pong.rawValue)
             w.u64(v)
+        case .key(let k):
+            w.u8(MessageType.key.rawValue)
+            w.u16(k.usage)
+            w.u8(k.down ? 1 : 0)
+        case .button(let b):
+            w.u8(MessageType.button.rawValue)
+            w.u8(b.button.rawValue)
+            w.u8(b.down ? 1 : 0)
+        case .orientation(let o):
+            w.u8(MessageType.orientation.rawValue)
+            w.u8(o.rawValue)
+        case .installBegin(let name, let size):
+            w.u8(MessageType.installBegin.rawValue)
+            w.string(name)
+            w.u64(size)
+        case .installChunk(let data):
+            w.u8(MessageType.installChunk.rawValue)
+            w.data.append(data)
+        case .installEnd:
+            w.u8(MessageType.installEnd.rawValue)
+        case .installStatus(let s):
+            w.u8(MessageType.installStatus.rawValue)
+            w.u8(s.state.rawValue)
+            w.string(s.message)
+        case .streamConfig(let c):
+            w.u8(MessageType.streamConfig.rawValue)
+            w.u8(c.video.rawValue)
+        case .frameInfo(let f):
+            w.u8(MessageType.frameInfo.rawValue)
+            w.u32(f.rtpTimestamp)
+            w.u8(f.isKeyframe ? 1 : 0)
+            w.u32(f.inputAck)
+            w.u32(f.ackAgeMicros)
+            w.u32(f.encodeMicros)
+        case .videoChunk(let c):
+            w.u8(MessageType.videoChunk.rawValue)
+            w.u32(c.frame)
+            w.u16(c.index)
+            w.u16(c.count)
+            w.data.append(c.bytes)
         }
         let length = UInt32(w.data.count - 4).bigEndian
         withUnsafeBytes(of: length) { w.data.replaceSubrange(0..<4, with: $0) }
         return w.data
     }
+
+    /// The message without its length prefix: one data channel message.
+    public func encodedBody() -> Data { encoded().dropFirst(4) }
 
     /// Parses one message body (type byte + payload, without the length prefix).
     public init(body: Data) throws {
@@ -205,6 +397,37 @@ extension SimStreamMessage {
             self = .ping(try r.u64())
         case .pong:
             self = .pong(try r.u64())
+        case .key:
+            self = .key(KeyEvent(usage: try r.u16(), down: try r.u8() != 0))
+        case .button:
+            let raw = try r.u8()
+            guard let button = ButtonEvent.Button(rawValue: raw) else { throw SimStreamError.badValue("button \(raw)") }
+            self = .button(ButtonEvent(button: button, down: try r.u8() != 0))
+        case .orientation:
+            let raw = try r.u8()
+            guard let o = Orientation(rawValue: raw) else { throw SimStreamError.badValue("orientation \(raw)") }
+            self = .orientation(o)
+        case .installBegin:
+            self = .installBegin(name: try r.string(), size: try r.u64())
+        case .installChunk:
+            self = .installChunk(r.rest())
+        case .installEnd:
+            self = .installEnd
+        case .installStatus:
+            let raw = try r.u8()
+            guard let state = InstallStatus.State(rawValue: raw) else { throw SimStreamError.badValue("install state \(raw)") }
+            self = .installStatus(InstallStatus(state: state, message: try r.string()))
+        case .streamConfig:
+            let raw = try r.u8()
+            guard let video = StreamConfig.VideoTransport(rawValue: raw) else { throw SimStreamError.badValue("video transport \(raw)") }
+            self = .streamConfig(StreamConfig(video: video))
+        case .frameInfo:
+            self = .frameInfo(FrameInfo(
+                rtpTimestamp: try r.u32(), isKeyframe: try r.u8() & 1 != 0, inputAck: try r.u32(),
+                ackAgeMicros: try r.u32(), encodeMicros: try r.u32()
+            ))
+        case .videoChunk:
+            self = .videoChunk(VideoChunk(frame: try r.u32(), index: try r.u16(), count: try r.u16(), bytes: r.rest()))
         }
         guard r.isAtEnd else { throw SimStreamError.badValue("trailing bytes in \(type)") }
     }

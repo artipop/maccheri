@@ -1,0 +1,22 @@
+# Local stack: certificates from Caddy's own CA, no ACME. DOMAIN is the Mac's Bonjour name
+# (e.g. Mac-mini-Artem.local) and LAN_IP its LAN address; both work from other machines once
+# they trust the CA (deploy/README.md, "Локально").
+{
+	local_certs
+	skip_install_trust
+	# Clients that connect by IP send no SNI; serve the LAN_IP certificate to them.
+	default_sni {$LAN_IP}
+}
+
+{$DOMAIN}, {$LAN_IP} {
+	encode zstd gzip
+	log {
+		output stdout
+		format filter {
+			request>uri query {
+				replace token REDACTED
+			}
+		}
+	}
+	reverse_proxy controlplane:8080
+}

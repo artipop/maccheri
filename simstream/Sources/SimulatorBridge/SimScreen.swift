@@ -29,10 +29,20 @@ public final class SimScreen: @unchecked Sendable {
         return surface
     }
 
-    /// Starts callbacks. Sometimes the first registration after a simulator boot never gets a
-    /// surface; then it re-registers, and after two misses moves on to the next screen ID.
-    public func start() throws {
-        let found = try Self.screens(of: device)
+    /// Starts callbacks. For a few seconds after `simctl boot` returns the main screen (ID 1) is
+    /// missing while the other IDs exist and never get a surface, so this waits up to
+    /// `mainScreenTimeout` for it. Sometimes the first registration after a boot never gets a
+    /// surface either; then it re-registers, and after two misses moves on to the next screen ID.
+    public func start(mainScreenTimeout: TimeInterval = 60) throws {
+        var found = try Self.screens(of: device)
+        if !found.contains(where: { $0.0 == 1 }) {
+            print("waiting for the simulator's main screen")
+            let deadline = Date().addingTimeInterval(mainScreenTimeout)
+            while !found.contains(where: { $0.0 == 1 }), Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.5)
+                found = try Self.screens(of: device)
+            }
+        }
         let screens = found.map { ($0.0, $0.1) }
         guard !screens.isEmpty else { throw SimulatorBridgeError.call("SimDeviceScreen: no screen on device", nil) }
         queue.sync {

@@ -22,6 +22,8 @@ final class StreamServer: @unchecked Sendable {
     private let device: SimDevice
     private let screen: SimScreen
     private let touch: SimTouchInjector
+    private let controls: SimDeviceControls
+    private var upload: AppUpload?
     private let encoder: VideoEncoder
     private let hello: Hello
     private let listener: NWListener
@@ -76,10 +78,11 @@ final class StreamServer: @unchecked Sendable {
     // Stats (server queue).
     private var stats = (frames: 0, bytes: 0, dropped: 0, keyframes: 0, encodeMicros: [UInt32]())
 
-    init(device: SimDevice, screen: SimScreen, touch: SimTouchInjector, options: Options) throws {
+    init(device: SimDevice, screen: SimScreen, touch: SimTouchInjector, controls: SimDeviceControls, options: Options) throws {
         self.device = device
         self.screen = screen
         self.touch = touch
+        self.controls = controls
         self.options = options
         guard let surface = screen.currentSurface else { throw NSError(domain: "simstream", code: 2, userInfo: [NSLocalizedDescriptionKey: "no frames from the simulator screen"]) }
         let screenWidth = IOSurfaceGetWidth(surface), screenHeight = IOSurfaceGetHeight(surface)
@@ -198,7 +201,36 @@ final class StreamServer: @unchecked Sendable {
             screen.queue.async { self.resendLastFrame() }
         case .ping(let v):
             send(.pong(v))
-        case .hello, .video, .pong:
+        case .key(let k):
+            lastTouchMicros = uptimeMicros()
+            controls.key(usage: k.usage, down: k.down)
+        case .button(let b):
+            lastTouchMicros = uptimeMicros()
+            let button: SimDeviceControls.Button = switch b.button {
+            case .home: .home
+            case .lock: .lock
+            case .siri: .siri
+            case .volumeUp: .volumeUp
+            case .volumeDown: .volumeDown
+            }
+            controls.button(button, down: b.down)
+        case .orientation(let o):
+            do {
+                try controls.setOrientation(UInt32(o.rawValue))
+            } catch {
+                print("rotate: \(error)")
+            }
+        case .installBegin(let name, let size):
+            upload?.cancel()
+            upload = AppUpload(name: name, size: size, udid: device.udid) { [weak self] status in
+                self?.queue.async { self?.send(.installStatus(status)) }
+            }
+        case .installChunk(let data):
+            upload?.append(data)
+        case .installEnd:
+            upload?.finish()
+            upload = nil
+        case .hello, .video, .pong, .installStatus, .streamConfig, .frameInfo, .videoChunk:
             break
         }
     }

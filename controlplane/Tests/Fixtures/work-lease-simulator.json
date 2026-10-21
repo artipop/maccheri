@@ -1,0 +1,33 @@
+{
+  "simulator" : {
+    "_0" : {
+      "device" : {
+        "deviceType" : "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+        "runtime" : "com.apple.CoreSimulator.SimRuntime.iOS-27-2"
+      },
+      "image" : "macos-27-xcode-27.2",
+      "sessionID" : "C4A1E8D2-5B3F-4E7A-9C0D-1E2F3A4B5C63",
+      "signaling" : {
+        "iceServers" : [
+          {
+            "urls" : [
+              "stun:turn.maccheri.example:3478"
+            ]
+          },
+          {
+            "credential" : "ZZ224NG03WwZNUC7kHDwTZ2AqA0=",
+            "urls" : [
+              "turn:turn.maccheri.example:3478?transport=udp",
+              "turn:turn.maccheri.example:3478?transport=tcp",
+              "turns:turn.maccheri.example:443?transport=tcp"
+            ],
+            "username" : "1792580400:C4A1E8D2-5B3F-4E7A-9C0D-1E2F3A4B5C63"
+          }
+        ],
+        "token" : "mcs_host_8cJ5mN2vB6xK9qW3eR7t",
+        "url" : "wss://maccheri.example/v1/sessions/C4A1E8D2-5B3F-4E7A-9C0D-1E2F3A4B5C63/signal?role=host&token=mcs_host_8cJ5mN2vB6xK9qW3eR7t"
+      },
+      "timeoutSeconds" : 3600
+    }
+  }
+}

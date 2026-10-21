@@ -1,0 +1,37 @@
+# DOMAIN serves the web client and the API; TURN_DOMAIN must be a separate name pointing to the
+# same server. TLS connections for TURN_DOMAIN on :443 are terminated here and passed to coturn
+# as plain TURN over TCP (turns:TURN_DOMAIN:443); everything else goes on to HTTP.
+{
+	email {$ACME_EMAIL}
+	servers :443 {
+		listener_wrappers {
+			layer4 {
+				@turn tls sni {$TURN_DOMAIN}
+				route @turn {
+					tls
+					proxy {$TURN_UPSTREAM:host.docker.internal:3478}
+				}
+			}
+			tls
+		}
+	}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+	# Access log without signaling tokens: browsers pass them in the WebSocket URL.
+	log {
+		output stdout
+		format filter {
+			request>uri query {
+				replace token REDACTED
+			}
+		}
+	}
+	reverse_proxy controlplane:8080
+}
+
+# Only here so Caddy obtains and renews the certificate the TURN route above uses.
+{$TURN_DOMAIN} {
+	respond "maccheri TURN" 200
+}

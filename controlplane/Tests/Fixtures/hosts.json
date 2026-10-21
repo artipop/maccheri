@@ -1,0 +1,46 @@
+[
+  {
+    "capacity" : {
+      "devices" : [
+        {
+          "deviceType" : "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+          "runtime" : "com.apple.CoreSimulator.SimRuntime.iOS-27-2"
+        }
+      ],
+      "freeSlots" : 0,
+      "images" : [
+        "macos-27-xcode-27.2"
+      ],
+      "labels" : [
+        "maccheri",
+        "macos-27",
+        "xcode-27.2"
+      ],
+      "warmVMs" : 1
+    },
+    "hardware" : {
+      "chip" : "Apple M4",
+      "cpuCount" : 10,
+      "macOSVersion" : "27.0.1",
+      "memoryBytes" : 17179869184,
+      "model" : "Mac16,10"
+    },
+    "id" : "0B7E5C3A-2D4F-4A61-8E9B-7C1D2E3F4A52",
+    "name" : "Artem's Mac mini",
+    "online" : true,
+    "ownerName" : "Artem"
+  },
+  {
+    "hardware" : {
+      "chip" : "Apple M4",
+      "cpuCount" : 10,
+      "macOSVersion" : "27.0.1",
+      "memoryBytes" : 17179869184,
+      "model" : "Mac16,10"
+    },
+    "id" : "1A2B3C4D-5E6F-4A7B-8C9D-0E1F2A3B4C85",
+    "name" : "Studio",
+    "online" : false,
+    "ownerName" : "Artem"
+  }
+]
