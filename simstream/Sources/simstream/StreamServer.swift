@@ -198,7 +198,8 @@ final class StreamServer: @unchecked Sendable {
             screen.queue.async { self.resendLastFrame() }
         case .ping(let v):
             send(.pong(v))
-        case .hello, .video, .pong:
+        case .hello, .video, .pong, .key, .button, .orientation, .installBegin, .installChunk, .installEnd,
+             .installStatus, .streamConfig, .frameInfo, .videoChunk:
             break
         }
     }
