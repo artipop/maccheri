@@ -33,15 +33,13 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-const preferredTransport = (): VideoTransport => {
-  const saved = params.get('video') ?? localStorage.getItem('maccheri.video')
-  // WebCodecs exists only in a secure context (https or localhost); without it only the track works.
-  if (saved === 'track' || (saved === 'dataChannel' && CanvasRenderer.supported)) return saved
-  // Measured (bench/simstream/RESULTS.md): WebCodecs is faster in Chromium, the track is faster in
-  // Firefox, Safari is even.
-  if (/Firefox\//.test(navigator.userAgent)) return 'track'
-  return CanvasRenderer.supported ? 'dataChannel' : 'track'
-}
+/**
+ * The standard path, the RTP track (with loss recovery), unless `?video=dataChannel` asks for the
+ * other one for measurements. The default is decided by measurements over the internet
+ * (bench/simstream/RESULTS.md), not per browser. WebCodecs needs a secure context.
+ */
+const preferredTransport = (): VideoTransport =>
+  params.get('video') === 'dataChannel' && CanvasRenderer.supported ? 'dataChannel' : 'track'
 
 // MARK: - Sign in
 
@@ -109,7 +107,6 @@ async function home() {
   start.onclick = async () => {
     start.disabled = true
     error.textContent = ''
-    localStorage.setItem('maccheri.video', transport.value)
     try {
       const choice = devices.get(select.value)!
       const session = await api.createSession({ device: select.value === 'any' ? null : choice.device, hostID: choice.hostID ?? null })
@@ -307,6 +304,16 @@ function runSession(info: SessionInfo, transport: VideoTransport) {
   picker.onchange = () => { if (picker.files?.[0]) void install(picker.files[0]) }
   toolbar.append(picker)
   button('Установить .app', 'Загрузить .app в zip-архиве', () => picker.click())
+  // Video path switch, for comparing both on the same connection (measurements).
+  const videoLabel = (t: VideoTransport) => (t === 'track' ? 'Видео: дорожка' : 'Видео: канал данных')
+  const videoButton = button(videoLabel(transport), 'Переключить, как везти видео (для замеров)', () => {
+    try {
+      session.setTransport(session.transport === 'track' ? 'dataChannel' : 'track')
+      videoButton.textContent = videoLabel(session.transport)
+    } catch (e) {
+      status.textContent = errorText(e)
+    }
+  })
   toolbar.append(h('span', { class: 'spacer' }))
   const deviceLabel = h('span', { class: 'muted' }, info.hostName ?? '')
   toolbar.append(deviceLabel)

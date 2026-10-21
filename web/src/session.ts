@@ -60,7 +60,10 @@ export class SimSession {
   }
 
   /** `relayOnly` forces TURN (testing the relay path). */
-  constructor(private signaling: SignalingInfo, readonly transport: VideoTransport, private events: SessionEvents, relayOnly = false) {
+  /** The video track as it arrived, kept so the session can switch to it later. */
+  private incoming: { receiver: RTCRtpReceiver; stream: MediaStream } | null = null
+
+  constructor(private signaling: SignalingInfo, private _transport: VideoTransport, private events: SessionEvents, relayOnly = false) {
     this.pc = new RTCPeerConnection({
       iceServers: signaling.iceServers.map((s) => ({ urls: s.urls, username: s.username ?? undefined, credential: s.credential ?? undefined })),
       iceTransportPolicy: relayOnly ? 'relay' : 'all',
@@ -85,11 +88,11 @@ export class SimSession {
     }
     pc.ondatachannel = (e) => this.channel(e.channel)
     pc.ontrack = (e) => {
-      if (this.transport !== 'track' || e.track.kind !== 'video') return
-      const renderer = new TrackRenderer(e.receiver, e.streams[0] ?? new MediaStream([e.track]))
-      this.useRenderer(renderer)
+      if (e.track.kind !== 'video') return
+      this.incoming = { receiver: e.receiver, stream: e.streams[0] ?? new MediaStream([e.track]) }
+      if (this._transport === 'track') this.useRenderer(new TrackRenderer(this.incoming.receiver, this.incoming.stream))
     }
-    if (this.transport === 'dataChannel') this.useRenderer(new CanvasRenderer())
+    if (this._transport === 'dataChannel') this.useRenderer(new CanvasRenderer())
 
     const ws = new WebSocket(this.signaling.url)
     this.ws = ws
@@ -146,7 +149,7 @@ export class SimSession {
     dc.binaryType = 'arraybuffer'
     if (dc.label === 'control') {
       this.control = dc
-      dc.onopen = () => this.send({ type: 'streamConfig', video: this.transport })
+      dc.onopen = () => this.send({ type: 'streamConfig', video: this._transport })
       dc.onmessage = (e) => this.onControl(decode(new Uint8Array(e.data as ArrayBuffer)))
       dc.onclose = () => this.end('the host closed the session')
     } else if (dc.label === 'video') {
@@ -175,6 +178,24 @@ export class SimSession {
 
   send(m: Message) {
     if (this.control?.readyState === 'open') this.control.send(encode(m) as Uint8Array<ArrayBuffer>)
+  }
+
+  get transport(): VideoTransport { return this._transport }
+
+  /**
+   * Switches how video arrives without reconnecting, for side-by-side measurements: the host
+   * starts the other path with a keyframe. Latency samples start over.
+   */
+  setTransport(transport: VideoTransport) {
+    if (transport === this._transport) return
+    if (transport === 'dataChannel' && !CanvasRenderer.supported) throw new Error('WebCodecs is unavailable here (needs https)')
+    if (transport === 'track' && !this.incoming) throw new Error('no video track in this session')
+    this._transport = transport
+    this.tracker = new LatencyTracker()
+    this.assembler = new FrameAssembler()
+    this.useRenderer(transport === 'track' ? new TrackRenderer(this.incoming!.receiver, this.incoming!.stream) : new CanvasRenderer())
+    this.send({ type: 'streamConfig', video: transport })
+    this.note(`video over ${transport}`)
   }
 
   /** x, y normalised to the screen, 0…1 from the top-left. */
@@ -253,7 +274,7 @@ export class SimSession {
       serverP50Ms: server.length ? server[Math.floor(server.length / 2)] : null,
       clicks: this.tracker.samples.length,
       lostFrames: this.assembler.lost,
-      transport: this.transport,
+      transport: this._transport,
     })
   }
 
