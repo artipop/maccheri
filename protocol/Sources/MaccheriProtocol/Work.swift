@@ -4,8 +4,11 @@ import Foundation
 ///
 ///     POST /agent/v1/work                      (agent token) LeaseRequest → 200 WorkLease | 204
 ///     POST /agent/v1/jobs/{id}/complete        (agent token) CompleteRequest → 204
-///     POST /agent/v1/sessions/{id}/state       (agent token) SessionStateReport → 204
+///     POST /agent/v1/sessions/{id}/state       (agent token) SessionStateReport → 204 | 410 Gone
 ///
+/// `410 Gone` on a state report means the session is already over on the control plane's side:
+/// the agent tears it down. Ended sessions also arrive in ``HeartbeatResponse/endedSessions`` and
+/// as `bye` on the host's signaling channel.
 /// This supersedes `AgentAPI.leasePath`, which only knows CI jobs.
 public enum WorkAPI {
     public static let workPath = "/agent/v1/work"
