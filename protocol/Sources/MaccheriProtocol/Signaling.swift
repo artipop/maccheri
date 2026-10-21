@@ -4,7 +4,11 @@ import Foundation
 /// these small messages; media and input go directly between the peers, or through TURN when
 /// no direct path exists.
 ///
-///     GET /v1/sessions/{id}/signal?role=viewer|host   WebSocket, `Authorization: Bearer <SignalingInfo.token>`
+///     GET /v1/sessions/{id}/signal?role=viewer|host&token=<SignalingInfo.token>   WebSocket
+///
+/// The token travels in the query because browsers can't set headers on a WebSocket; it is
+/// per-session and per-role, so it is fine in a URL, but servers must not log it.
+/// ``SignalingInfo/url`` already contains `role` and `token`: clients open it as is.
 ///
 /// Each WebSocket text frame is one JSON ``SignalMessage``. The control plane forwards every frame
 /// from one role to the other, unchanged, and queues frames sent before the other side joined.
@@ -34,9 +38,10 @@ public struct ICEServer: Codable, Sendable, Equatable {
 
 /// Everything one side needs to join a session's signaling channel.
 public struct SignalingInfo: Codable, Sendable, Equatable {
-    /// Absolute `wss://` URL of the session's signaling endpoint.
+    /// Absolute `wss://` URL of the session's signaling endpoint, with `role` and `token` in the query.
     public var url: URL
-    /// Per-session, per-role token; it is not the user's or the agent's long-lived token.
+    /// The same per-session, per-role token as in ``url``; it is not the user's or the agent's
+    /// long-lived token.
     public var token: String
     public var iceServers: [ICEServer]
 
