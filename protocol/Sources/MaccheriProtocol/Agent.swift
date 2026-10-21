@@ -1,12 +1,8 @@
 import Foundation
 
-/// Agent ↔ control plane API, version 1.
-///
-/// The agent long-polls `POST /agent/v1/lease`; when a job is available the control plane
-/// answers with a ``JobLease`` carrying a just-in-time runner config. After the VM is
-/// destroyed the agent reports the outcome with `POST /agent/v1/jobs/{id}/complete`.
+/// CI pieces of the agent ↔ control plane API. The agent asks for work with ``LeaseRequest`` on
+/// `WorkAPI.workPath` (see `Work.swift`) and reports a finished CI job here.
 public enum AgentAPI {
-    public static let leasePath = "/agent/v1/lease"
     public static func completePath(jobID: UUID) -> String { "/agent/v1/jobs/\(jobID.uuidString)/complete" }
 }
 

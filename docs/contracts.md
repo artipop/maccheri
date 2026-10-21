@@ -50,7 +50,7 @@
 | `Signaling.swift` | WebSocket-сигнализация `/v1/sessions/{id}/signal`, ICE/TURN, `SignalMessage` |
 | `Work.swift` | общий long-poll агента `/agent/v1/work` (CI и симулятор), отчёты о состоянии сессии |
 | `Guest.swift` | `session.json` в общей папке гостя: что гость должен сделать |
-| `Agent.swift` | старый v1 (`/agent/v1/lease`, только CI). B держит его, пока A не перейдёт на `/agent/v1/work` |
+| `Agent.swift` | `LeaseRequest` (тело `/agent/v1/work`), отчёт о завершении CI-задания. Старый `/agent/v1/lease` удалён |
 
 JSON: даты в ISO 8601, перечисления с данными кодируются стандартным синтезом Swift `Codable`
 (`{"ci":{"_0":{…}}}`). Swift-клиенты и сервер используют одни и те же типы, руками JSON не пишем.
