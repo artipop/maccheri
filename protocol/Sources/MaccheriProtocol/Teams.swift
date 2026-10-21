@@ -114,8 +114,11 @@ public struct CreateInviteRequest: Codable, Sendable, Equatable {
 }
 
 public struct HostEnrollmentCode: Codable, Sendable, Equatable {
-    /// One-time code for `HostEnrollRequest.code`; short-lived.
+    /// One-time code for `HostEnrollRequest.code`; short-lived. Always starts with ``codePrefix``,
+    /// which is how Maccheri.app tells a code from a v1 shared token.
     public var code: String
+
+    public static let codePrefix = "hc_"
     public var expiresAt: Date
 
     public init(code: String, expiresAt: Date) {
