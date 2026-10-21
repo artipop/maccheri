@@ -1,10 +1,11 @@
 #!/bin/bash
-# Runs inside the guest during images/build.sh, as admin over SSH, with the build's staging
-# directory shared read-only at $STAGE. Everything here must be safe to re-run.
+# Runs inside the guest during images/build.sh, as admin over SSH, with the staging
+# directory shared read-only at $STAGE (large inputs) and this build's own files in $FILES.
+# Everything here must be safe to re-run.
 #
-#   STAGE=... XCODE_TAR=... RUNTIME_DMG=... RUNNER_TAR=... DEVICES="type,runtime ..." guest-setup.sh
+#   STAGE=... FILES=... XCODE_TAR=... RUNTIME_DMG=... RUNNER_TAR=... DEVICES="type,runtime ..." guest-setup.sh
 set -euo pipefail
-: "${STAGE:?}" "${XCODE_TAR:?}" "${RUNTIME_DMG:?}" "${RUNNER_TAR:?}" "${DEVICES:?}"
+: "${STAGE:?}" "${FILES:?}" "${XCODE_TAR:?}" "${RUNTIME_DMG:?}" "${RUNNER_TAR:?}" "${DEVICES:?}"
 step() { echo "==> $*"; }
 
 step "disk: grow the APFS container to the resized disk"
@@ -57,11 +58,11 @@ step "maccheri-guestd and simstream"
 sudo mkdir -p /usr/local/bin "/Library/Application Support/Maccheri"
 for bin in maccheri-guestd simstream; do
     # New file + mv: a running binary overwritten in place is killed for an invalid signature.
-    sudo cp "$STAGE/$bin" "/usr/local/bin/$bin.new"
+    sudo cp "$FILES/$bin" "/usr/local/bin/$bin.new"
     sudo mv -f "/usr/local/bin/$bin.new" "/usr/local/bin/$bin"
 done
-sudo cp "$STAGE/maccheri.json" "/Library/Application Support/Maccheri/maccheri.json"
-sudo cp "$STAGE/dev.maccheri.guestd.plist" /Library/LaunchAgents/dev.maccheri.guestd.plist
+sudo cp "$FILES/maccheri.json" "/Library/Application Support/Maccheri/maccheri.json"
+sudo cp "$FILES/dev.maccheri.guestd.plist" /Library/LaunchAgents/dev.maccheri.guestd.plist
 sudo chown root:wheel /Library/LaunchAgents/dev.maccheri.guestd.plist /usr/local/bin/maccheri-guestd /usr/local/bin/simstream
 sudo chmod 644 /Library/LaunchAgents/dev.maccheri.guestd.plist
 
