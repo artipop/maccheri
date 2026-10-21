@@ -1,11 +1,11 @@
 #!/bin/bash
-# Registers the team's GitHub App with GitHub's manifest flow, from this Mac:
+# Registers the GitHub App (sign-in and CI) with GitHub's manifest flow, from this Mac:
 #
 #   guest/github-app/register.sh DOMAIN [--org ORG] [--name NAME]
 #
 # Opens GitHub in the browser with the manifest filled in; after "Create GitHub App" GitHub
 # redirects back to a one-shot listener on localhost, and the script exchanges the code for the
-# App's id, private key and webhook secret. They are written to ~/.maccheri/github-app-<slug>.json
+# App's id, private key, webhook secret and OAuth client. They are written to ~/.maccheri/github-app-<slug>.json
 # (mode 600) and nowhere else: never into the repository.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -24,7 +24,9 @@ PORT=8765
 
 MANIFEST="$(jq -c --arg name "$NAME" --arg url "https://$DOMAIN" --arg hook "https://$DOMAIN/github/webhook" \
     --arg redirect "http://localhost:$PORT/callback" \
-    '.name = $name | .url = $url | .hook_attributes.url = $hook | .redirect_url = $redirect' manifest.json)"
+    --arg callback "https://$DOMAIN/auth/github/callback" --arg setup "https://$DOMAIN/github/setup" \
+    '.name = $name | .url = $url | .hook_attributes.url = $hook | .redirect_url = $redirect
+     | .callback_urls = [$callback] | .setup_url = $setup' manifest.json)"
 if [ -n "$ORG" ]; then
     # Runners for every repository of the organisation, not just the ones the App is installed on.
     MANIFEST="$(echo "$MANIFEST" | jq -c '.default_permissions.organization_self_hosted_runners = "write"')"
@@ -63,9 +65,14 @@ OUT=~/.maccheri/github-app-"$SLUG".json
 echo
 echo "Created $(echo "$RESULT" | jq -r .html_url), saved to $OUT."
 echo "Next:"
-echo "  1. Install it on the test repository: $(echo "$RESULT" | jq -r .html_url)/installations/new"
-echo "  2. Give the control plane (deploy/.env on the server, not the repository):"
+echo "  1. Give the control plane its environment (deploy/.env on the server, not the repository):"
 echo "       GITHUB_APP_ID=$(echo "$RESULT" | jq -r .id)"
+echo "       GITHUB_APP_SLUG=$SLUG"
+echo "       GITHUB_CLIENT_ID=$(echo "$RESULT" | jq -r .client_id)"
+echo "       GITHUB_CLIENT_SECRET=<client_secret from $OUT>"
 echo "       GITHUB_WEBHOOK_SECRET=<webhook_secret from $OUT>"
 echo "       GITHUB_APP_PRIVATE_KEY=<pem from $OUT>"
-echo "     e.g.  jq -r .pem $OUT  and  jq -r .webhook_secret $OUT"
+echo "     e.g.  jq -r .client_secret $OUT,  jq -r .webhook_secret $OUT,  jq -r .pem $OUT"
+echo "  2. Sign in to the web client with GitHub, create a team and install the App from the team's"
+echo "     page: the link carries a state that binds the installation to the team. Installing from"
+echo "     $(echo "$RESULT" | jq -r .html_url) directly binds it to no team."

@@ -8,6 +8,10 @@
     "active": true
   },
   "redirect_url": "http://localhost:8765/callback",
+  "callback_urls": ["https://example.com/auth/github/callback"],
+  "setup_url": "https://example.com/github/setup",
+  "setup_on_update": true,
+  "request_oauth_on_install": false,
   "default_permissions": {
     "metadata": "read",
     "actions": "read",
