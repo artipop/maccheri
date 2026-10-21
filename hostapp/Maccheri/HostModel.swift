@@ -44,15 +44,30 @@ final class HostModel {
 
     // MARK: Enrollment
 
+    /// The error of the last ``enroll(controlPlane:token:)``, shown next to the form.
+    private(set) var enrollmentError: String?
+
+    /// `maccheri.example.com` or `http://192.168.1.10:8080/` → a base URL without a trailing slash.
+    static func controlPlaneURL(_ text: String) -> URL? {
+        var text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        while text.hasSuffix("/") { text.removeLast() }
+        guard !text.isEmpty else { return nil }
+        if !text.contains("://") { text = "https://" + text }
+        guard let url = URL(string: text), let scheme = url.scheme, ["http", "https"].contains(scheme), url.host() != nil else { return nil }
+        return url
+    }
+
+    /// Registers this Mac with the team's control plane and starts taking work.
     func enroll(controlPlane: String, token: String) async {
-        guard let url = URL(string: controlPlane.trimmingCharacters(in: .whitespaces)), url.scheme?.hasPrefix("http") == true else {
-            problem = String(localized: "Enter the control plane address, e.g. https://maccheri.example.com")
+        guard let url = Self.controlPlaneURL(controlPlane) else {
+            enrollmentError = String(localized: "Enter the server address, e.g. maccheri.example.com")
             return
         }
-        problem = nil
+        let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        enrollmentError = nil
         do {
             let request = HostEnrollRequest(name: HostInventory.computerName, hardware: HostInventory.hardware())
-            let enrollment = try await ControlPlaneClient.enroll(baseURL: url, userToken: token.trimmingCharacters(in: .whitespaces), request)
+            let enrollment = try await ControlPlaneClient.enroll(baseURL: url, userToken: token, request)
             let credentials = AgentCredentials(controlPlane: url, hostID: enrollment.hostID, agentToken: enrollment.agentToken)
             try credentials.save()
             self.credentials = credentials
@@ -60,8 +75,29 @@ final class HostModel {
             await stop()
             start()
         } catch {
-            problem = String(localized: "Enrollment failed: \(String(describing: error))")
+            settings.controlPlane = url.absoluteString
+            enrollmentError = Self.explain(error, url: url)
         }
+    }
+
+    private static func explain(_ error: any Error, url: URL) -> String {
+        switch error {
+        case ControlPlaneError.unauthorized:
+            return String(localized: "The server did not accept the token.")
+        case let ControlPlaneError.http(status, _) where status == 404:
+            return String(localized: "\(url.host() ?? "") answered, but it isn't a Maccheri server (404).")
+        case let error as URLError where [.cannotFindHost, .cannotConnectToHost, .dnsLookupFailed, .timedOut, .notConnectedToInternet, .networkConnectionLost].contains(error.code):
+            return String(localized: "Can't reach \(url.host() ?? url.absoluteString): \(error.localizedDescription)")
+        case let error as URLError where error.code == .secureConnectionFailed || error.code == .serverCertificateUntrusted:
+            return String(localized: "Secure connection to \(url.host() ?? "") failed. For a server without HTTPS, type http:// in front of the address.")
+        default:
+            return String(localized: "Couldn't connect: \(String(describing: error))")
+        }
+    }
+
+    /// Images in the images folder that can take work (built for Maccheri, with `maccheri.json`).
+    var servableImages: [String] {
+        settings.store.images().filter { $0.metadata != nil }.map(\.name)
     }
 
     func signOut() async {
@@ -69,6 +105,7 @@ final class HostModel {
         AgentCredentials.delete()
         credentials = nil
         status = AgentStatus()
+        enrollmentError = nil
     }
 
     // MARK: Agent

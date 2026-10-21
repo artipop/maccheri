@@ -18,31 +18,19 @@ struct SettingsView: View {
 
 private struct ConnectionSettings: View {
     @Bindable var host: HostModel
-    @State private var address = ""
-    @State private var token = ""
-    @State private var enrolling = false
 
     var body: some View {
         Form {
             if let credentials = host.credentials {
-                LabeledContent("Control plane", value: credentials.controlPlane.absoluteString)
+                LabeledContent("Server", value: credentials.controlPlane.absoluteString)
+                LabeledContent("This Mac", value: HostInventory.computerName)
                 LabeledContent("Host ID", value: credentials.hostID.uuidString)
                     .textSelection(.enabled)
-                Button("Sign Out", role: .destructive) {
+                Button("Disconnect This Mac", role: .destructive) {
                     Task { await host.signOut() }
                 }
             } else {
-                TextField("Control plane", text: $address, prompt: Text("https://maccheri.example.com"))
-                SecureField("Token", text: $token)
-                Button(enrolling ? "Connecting…" : "Connect This Mac") {
-                    enrolling = true
-                    Task {
-                        await host.enroll(controlPlane: address, token: token)
-                        enrolling = false
-                        if host.credentials != nil { token = "" }
-                    }
-                }
-                .disabled(enrolling || address.isEmpty || token.isEmpty)
+                ConnectForm(host: host)
             }
             if let problem = host.problem {
                 Text(problem)
@@ -52,7 +40,48 @@ private struct ConnectionSettings: View {
             Toggle("Launch at login", isOn: Binding(get: { host.launchAtLogin }, set: { host.launchAtLogin = $0 }))
         }
         .formStyle(.grouped)
-        .onAppear { address = host.settings.controlPlane }
+    }
+}
+
+/// Server address and token → enrolled. Shown in the menu bar window and in Settings.
+struct ConnectForm: View {
+    @Bindable var host: HostModel
+    @State private var address = ""
+    @State private var token = ""
+    @State private var connecting = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("Server", text: $address, prompt: Text("maccheri.example.com"))
+                .textContentType(.URL)
+            SecureField("Token", text: $token, prompt: Text("from the team's admin"))
+                .onSubmit(connect)
+            if let error = host.enrollmentError {
+                Text(error)
+                    .foregroundStyle(.red)
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                if connecting { ProgressView().controlSize(.small) }
+                Spacer()
+                Button(connecting ? "Connecting…" : "Connect This Mac", action: connect)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(connecting || address.trimmingCharacters(in: .whitespaces).isEmpty || token.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .textFieldStyle(.roundedBorder)
+        .onAppear { if address.isEmpty { address = host.settings.controlPlane } }
+    }
+
+    private func connect() {
+        guard !connecting else { return }
+        connecting = true
+        Task {
+            await host.enroll(controlPlane: address, token: token)
+            connecting = false
+            if host.credentials != nil { token = "" }
+        }
     }
 }
 
