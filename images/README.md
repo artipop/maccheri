@@ -71,13 +71,21 @@ cp -c -R $TART_HOME/vms/gg-vanilla /Volumes/Dev/vm/images/macos-27-vanilla
 
 ```sh
 agent/scripts/build.sh
-maccheri-vm --images /Volumes/Dev/vm/images --work /Volumes/Dev/vm/work --image macos-27-xcode-27.2-v1
+maccheri-vm --images /Volumes/Dev/vm/images --work /Volumes/Dev/vm/work --image macos-27-xcode-27.2-v2 \
+    --forward 7300 --forward 2222:22 [--session session.json]
 ```
 
-Then write `session.json` (see `guest/README.md`) into the `shared/` directory of the clone that
-`maccheri-vm` prints.
+The guest is on the agent's isolated network, so SSH goes through the forward:
+`ssh -p 2222 admin@127.0.0.1`. Write `session.json` (see `guest/README.md`) into the `shared/` directory
+of the clone that `maccheri-vm` prints, or pass it with `--session` for a cold start.
+
+Checked on `macos-27-xcode-27.2-v2` (2026-10-21):
+- simulator, warm VM: simstream accepts connections 6.8 s after the guest reads `session.json`;
+  removing the file ends the session and the guest powers off;
+- CI, cold VM: the runner starts 1 s after the daemon does and the guest powers off when it exits.
 
 ## Older images
 
 `macos-27-vanilla` and `macos-27-xcode-27.2` were built by hand. The latter has Xcode and the runtime
-but neither the runner nor the guest daemon.
+but neither the runner nor the guest daemon. `-v1` is the first `build.sh` image, with an older
+simstream and guest daemon.
