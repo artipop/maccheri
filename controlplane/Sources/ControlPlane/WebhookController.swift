@@ -1,11 +1,11 @@
 import Crypto
+import Fluent
 import Vapor
 
 /// Receives GitHub App webhooks. Only `workflow_job` matters for now.
 struct WebhookController: RouteCollection {
     let secret: String
     let runnerLabel: String
-    let queue: JobQueue
 
     func boot(routes: any RoutesBuilder) throws {
         routes.on(.POST, "github", "webhook", body: .collect(maxSize: "1mb"), use: receive)
@@ -27,18 +27,27 @@ struct WebhookController: RouteCollection {
             throw Abort(.unprocessableEntity, reason: "workflow_job without installation")
         }
 
+        let jobID = event.workflowJob.id
         switch event.action {
         case "queued":
-            await queue.enqueue(QueuedJob(
-                githubJobID: event.workflowJob.id,
+            guard try await CIJobModel.query(on: req.db).filter(\.$githubJobID == jobID).first() == nil else { break }
+            try await CIJobModel(
+                githubJobID: jobID,
                 repository: event.repository.fullName,
                 installationID: installation,
                 labels: labels,
-                enqueuedAt: Date()
-            ))
-            req.logger.info("queued", metadata: ["job": "\(event.workflowJob.id)", "repo": "\(event.repository.fullName)"])
+                enqueuedAt: req.maccheri.now
+            ).create(on: req.db)
+            req.maccheri.workAvailable.notifyAll()
+            req.logger.info("queued", metadata: ["job": "\(jobID)", "repo": "\(event.repository.fullName)"])
         case "completed":
-            await queue.githubJobCompleted(event.workflowJob.id)
+            // Finished or cancelled before a host took it: it no longer needs a runner.
+            try await CIJobModel.query(on: req.db)
+                .filter(\.$githubJobID == jobID)
+                .filter(\.$state == .pending)
+                .set(\.$state, to: .done)
+                .set(\.$doneAt, to: req.maccheri.now)
+                .update()
         default:
             break
         }
