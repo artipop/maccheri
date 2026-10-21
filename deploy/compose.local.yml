@@ -1,0 +1,37 @@
+# Local run on the dev Mac, reachable from other machines on the LAN over HTTPS:
+#     docker compose -f docker-compose.yml -f compose.local.yml --env-file .env.local up -d --build
+# Add `--profile turn` to start coturn as well (not needed on one LAN).
+services:
+  controlplane:
+    env_file: !override .env.local
+    environment:
+      # Signaling URLs must use a name the second machine resolves and trusts.
+      PUBLIC_URL: https://${DOMAIN:?set DOMAIN in .env.local}
+    ports: !override
+      # The host's own agent may also talk to it directly; still only on loopback.
+      - "127.0.0.1:8080:8080"
+
+  caddy:
+    ports: !override
+      - "${LAN_IP:?set LAN_IP in .env.local}:443:443"
+      - "${LAN_IP}:443:443/udp"
+      - "127.0.0.1:443:443"
+    environment:
+      LAN_IP: ${LAN_IP}
+    volumes: !override
+      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  coturn:
+    profiles: [turn]
+    network_mode: !reset null
+    ports:
+      - "${LAN_IP}:3478:3478/udp"
+      - "${LAN_IP}:3478:3478/tcp"
+      - "${LAN_IP}:49160-49179:49160-49179/udp"
+    environment:
+      TURN_MIN_PORT: 49160
+      TURN_MAX_PORT: 49179
+      # Every peer is in a private range here.
+      TURN_EXTRA_ARGS: --allowed-peer-ip=10.0.0.0-10.255.255.255 --allowed-peer-ip=172.16.0.0-172.31.255.255 --allowed-peer-ip=192.168.0.0-192.168.255.255
