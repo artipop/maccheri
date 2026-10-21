@@ -15,3 +15,47 @@ import Testing
     let data = try JSONEncoder().encode(CompleteRequest(outcome: .timedOut, durationSeconds: 1))
     #expect(String(decoding: data, as: UTF8.self).contains("\"timedOut\""))
 }
+
+private func roundTrip<T: Codable & Equatable>(_ value: T) throws -> T {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    return try decoder.decode(T.self, from: encoder.encode(value))
+}
+
+private let signaling = SignalingInfo(
+    url: URL(string: "wss://cp.example.com/v1/sessions/x/signal")!,
+    token: "t",
+    iceServers: [ICEServer(urls: ["turn:turn.example.com:3478"], username: "1:x", credential: "c")]
+)
+
+@Test func workLeaseRoundTrip() throws {
+    let ci = WorkLease.ci(JobLease(jobID: UUID(), githubJobID: 1, repository: "o/r", image: "i", jitConfig: "j", timeoutSeconds: 60))
+    let sim = WorkLease.simulator(SimulatorSessionLease(sessionID: UUID(), image: "i", device: .iPhone17Pro, timeoutSeconds: 60, signaling: signaling))
+    #expect(try roundTrip(ci) == ci)
+    #expect(try roundTrip(sim) == sim)
+}
+
+@Test func signalMessagesRoundTrip() throws {
+    for message: SignalMessage in [.offer(sdp: "v=0"), .answer(sdp: "v=0"), .candidate(candidate: "candidate:1", sdpMid: "0", sdpMLineIndex: 0), .bye(reason: nil)] {
+        #expect(try roundTrip(message) == message)
+    }
+}
+
+@Test func sessionAndHostRoundTrip() throws {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let session = SessionInfo(id: UUID(), state: .ready, device: .iPhone17Pro, hostID: UUID(), hostName: "mini", createdAt: now, expiresAt: now, signaling: signaling, message: nil)
+    #expect(try roundTrip(session) == session)
+    let hardware = HostHardware(model: "Mac16,10", chip: "Apple M4", cpuCount: 10, memoryBytes: 16 << 30, macOSVersion: "27.0.1")
+    let capacity = HostCapacity(freeSlots: 1, warmVMs: 1, images: ["macos-27-xcode-27.2"], labels: ["maccheri"], devices: [.iPhone17Pro])
+    let host = HostInfo(id: UUID(), name: "mini", ownerName: "artem", hardware: hardware, online: true, capacity: capacity)
+    #expect(try roundTrip(host) == host)
+    #expect(try roundTrip(Heartbeat(agentVersion: "0.1", capacity: capacity)).capacity == capacity)
+}
+
+@Test func guestSessionRoundTrip() throws {
+    let sim = GuestSession.simulator(GuestSimulatorSession(sessionID: UUID(), device: .iPhone17Pro))
+    #expect(try roundTrip(sim) == sim)
+    #expect(try roundTrip(GuestSession.ci(GuestCIJob(jitConfig: "abc"))) == .ci(GuestCIJob(jitConfig: "abc")))
+}
