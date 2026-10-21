@@ -33,7 +33,7 @@ public enum EnrollmentSecret: Sendable, Equatable {
     /// v1 (Vapor): the control plane's shared token, sent as `Authorization: Bearer`.
     case sharedToken(String)
 
-    public static let codePrefix = "hc_"
+    public static let codePrefix = HostEnrollmentCode.codePrefix
 
     /// A code if it looks like one, otherwise the shared token.
     public init(_ text: String) {
