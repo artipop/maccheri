@@ -9,7 +9,7 @@ thing: one CI job or one simulator session. Then the guest shuts down and the ho
 | The daemon | `Sources/GuestCore`, `Sources/maccheri-guestd` |
 | LaunchAgent | `launchd/dev.maccheri.guestd.plist` → `/Library/LaunchAgents/` |
 | Smoke-test repository for CI | `ci-smoke/` |
-| Registering the team's GitHub App | `github-app/` |
+| Registering the GitHub App (sign-in and CI) | `github-app/` |
 
 ## What it does
 
