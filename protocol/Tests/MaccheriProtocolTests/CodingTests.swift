@@ -59,3 +59,8 @@ private let signaling = SignalingInfo(
     #expect(try roundTrip(sim) == sim)
     #expect(try roundTrip(GuestSession.ci(GuestCIJob(jitConfig: "abc"))) == .ci(GuestCIJob(jitConfig: "abc")))
 }
+
+@Test func heartbeatResponseRoundTrip() throws {
+    let response = HeartbeatResponse(endedSessions: [UUID()])
+    #expect(try roundTrip(response) == response)
+}

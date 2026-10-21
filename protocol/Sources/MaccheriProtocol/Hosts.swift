@@ -5,7 +5,7 @@ import Foundation
 ///
 ///     POST /v1/hosts/enroll     (user token)  HostEnrollRequest → HostEnrollment
 ///     GET  /v1/hosts            (user token)  → [HostInfo]
-///     POST /agent/v1/heartbeat  (agent token) Heartbeat → 204
+///     POST /agent/v1/heartbeat  (agent token) Heartbeat → HeartbeatResponse
 ///
 /// A host that has not sent a heartbeat for ``HostAPI/offlineAfterSeconds`` is offline and gets no work.
 public enum HostAPI {
@@ -80,6 +80,9 @@ public struct HostCapacity: Codable, Sendable, Equatable {
     }
 }
 
+/// Capacity semantics: a warm VM counts against the host's VM cap. With a cap of 1 and one warm guest,
+/// `freeSlots` is 0 and `warmVMs` is 1. In ``LeaseRequest`` the agent sends
+/// `freeSlots = capacity.freeSlots + capacity.warmVMs`: how many pieces of work it can take right now.
 public struct Heartbeat: Codable, Sendable, Equatable {
     public var agentVersion: String
     public var capacity: HostCapacity
@@ -106,5 +109,16 @@ public struct HostInfo: Codable, Sendable, Equatable {
         self.hardware = hardware
         self.online = online
         self.capacity = capacity
+    }
+}
+
+public struct HeartbeatResponse: Codable, Sendable, Equatable {
+    /// Sessions this host runs that the control plane has ended (user `DELETE`, expiry, failure).
+    /// The agent tears them down. This is the reliable path; signaling `bye` and `410 Gone` on
+    /// `POST /agent/v1/sessions/{id}/state` are the fast ones.
+    public var endedSessions: [UUID]
+
+    public init(endedSessions: [UUID] = []) {
+        self.endedSessions = endedSessions
     }
 }
