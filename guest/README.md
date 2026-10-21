@@ -14,9 +14,9 @@ thing: one CI job or one simulator session. Then the guest shuts down and the ho
 
 1. Starts as a LaunchAgent in `admin`'s auto-login GUI session (`LimitLoadToSessionType Aqua`): the
    simulator does not boot without one.
-2. Pre-boots the image's default device (`devices.first` of
-   `/Library/Application Support/Maccheri/maccheri.json`), so that a simulator session in a warm VM
-   starts from a booted device.
+2. If `session.json` is not there yet (a VM waiting in the warm pool), pre-boots the image's default
+   device (`devices.first` of `/Library/Application Support/Maccheri/maccheri.json`), so that
+   a simulator session starts from a booted device. A cold VM finds its session at once and skips this.
 3. Polls `/Volumes/My Shared Files/maccheri/session.json` every 0.5 s. The file may appear long after
    boot (warm pool). A half-written file fails to decode and is read again on the next poll.
    Until the agent moves to `session.json`, a bare `jitconfig` file (the current `JobRunner`) also

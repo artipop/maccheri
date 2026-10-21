@@ -31,15 +31,22 @@ public struct GuestDaemon: Sendable {
         let metadata = try? ImageMetadata.load(from: options.metadata)
         log("guestd \(metadata?.guestVersion ?? "?"): waiting for \(options.share.appending(path: GuestAPI.sessionFile).path)")
 
-        let preboot: Task<String?, Never>? = options.preboot ? metadata?.devices.first.map { spec in
+        // A cold VM finds its session at once (the agent writes it before boot); pre-boot only for
+        // a VM that waits in the pool, where it cannot know which kind of session comes next.
+        let immediate = SessionSource.read(share: options.share)
+        let preboot: Task<String?, Never>? = options.preboot && immediate == nil ? metadata?.devices.first.map { spec in
             Task { await prebootDevice(spec) }
         } : nil
 
         let session: GuestSession
-        do {
-            session = try await SessionSource.wait(share: options.share)
-        } catch {
-            return
+        if let immediate {
+            session = immediate
+        } else {
+            do {
+                session = try await SessionSource.wait(share: options.share)
+            } catch {
+                return
+            }
         }
 
         switch session {
