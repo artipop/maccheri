@@ -41,6 +41,12 @@ struct StatusMenu: View {
                 }
             }
 
+            if host.credentials != nil, host.servableImages.isEmpty {
+                Label("No Maccheri images in \(host.settings.imagesPath). Choose the images folder in Settings.", systemImage: "externaldrive.badge.questionmark")
+                    .foregroundStyle(.orange)
+                    .font(.callout)
+            }
+
             if let problem = host.problem {
                 Label(problem, systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
@@ -67,9 +73,10 @@ struct StatusMenu: View {
     private var connection: some View {
         if host.credentials == nil {
             Label("Not connected to a pool", systemImage: "circle.dashed")
-            Text("Open Settings and sign in to your team's control plane.")
+            Text("Enter your team's Maccheri server and the token you were given.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            ConnectForm(host: host)
         } else {
             switch host.status.connection {
             case .online:
