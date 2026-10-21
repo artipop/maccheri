@@ -76,17 +76,56 @@ docker compose start controlplane
 
 ## Локально
 
-На маке с Docker Desktop: имена `localhost` и `turn.localhost` Caddy обслуживает своим внутренним CA.
+Весь стек на маке разработки, доступный с других машин в LAN по HTTPS. HTTPS нужен и здесь:
+браузер даёт WebCodecs и прочие API secure context только на `https://` (или `localhost`).
+Сертификаты выдаёт собственный CA Caddy, без ACME и интернета.
 
 ```sh
 cd deploy
-cp .env.example .env    # DOMAIN=localhost, TURN_DOMAIN=turn.localhost, TURN_SECRET=<любой>
-docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
-curl -k https://localhost/healthz
+cp .env.local.example .env.local
+# DOMAIN: имя мака в Bonjour — `scutil --get LocalHostName` + `.local`
+# LAN_IP: `ipconfig getifaddr en0`
+# MACCHERI_SHARED_TOKEN: `openssl rand -hex 32`
+docker compose -f docker-compose.yml -f compose.local.yml --env-file .env.local up -d --build
+curl -k https://$LAN_IP/healthz       # ok
 ```
 
-`docker-compose.local.yml` переводит coturn из сети хоста в обычную сеть compose с узким диапазоном
-relay-портов и разрешает relay в частные сети: в локальной сети все пиры в них.
+Что меняет `compose.local.yml`:
+- Caddy берёт `Caddyfile.local`: `local_certs`, сертификаты на `DOMAIN` и `LAN_IP`;
+- порты только на `LAN_IP` (и `127.0.0.1`), не на всех интерфейсах; control plane ещё и на `127.0.0.1:8080`;
+- переменные из `.env.local`;
+- coturn выключен (в одной LAN он не нужен), включается флагом `--profile turn`. Тогда в `.env.local`
+  нужны `TURN_DOMAIN=<LAN_IP>` и `TURN_SECRET`; адрес `turns:…:443` локально не работает, остальные работают.
+
+Сборка Swift-образа — самая тяжёлая операция на маке. Перед ней займи замок VM, как для запуска VM
+(`docs/contracts.md`): `mkdir /Volumes/Dev/vm/.lock && echo "B: docker build controlplane" > /Volumes/Dev/vm/.lock/owner`,
+после сборки `rm -r /Volumes/Dev/vm/.lock`.
+
+### Доверить локальный CA
+
+Корневой сертификат живёт в томе Caddy и не меняется, пока том не удалён (`down -v` его удалит):
+
+```sh
+docker compose -f docker-compose.yml -f compose.local.yml --env-file .env.local \
+    exec -T caddy cat /data/caddy/pki/authorities/local/root.crt > maccheri-local-ca.crt
+```
+
+Файл копируется на каждую машину, которая ходит к стеку, **включая сам мак-хост**: агент Maccheri.app
+обращается к `https://DOMAIN` и проверяет сертификат.
+
+- **macOS:** `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain maccheri-local-ca.crt`.
+  Этого хватает Safari, Chrome и URLSession. Firefox: Настройки → Приватность и защита → Сертификаты →
+  Импортировать, «доверять для веб-сайтов».
+- **Linux (Chrome/Chromium):** `sudo cp maccheri-local-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates`,
+  для Chrome ещё `certutil -d sql:$HOME/.pki/nssdb -A -t C,, -n maccheri-local -i maccheri-local-ca.crt`.
+- **Windows:** `certutil -addstore -f Root maccheri-local-ca.crt` из администраторской консоли.
+
+Удалить на macOS: `sudo security delete-certificate -c "Caddy Local Authority - 2026 ECC Root" /Library/Keychains/System.keychain`
+(точное имя видно в «Связке ключей»).
+
+Открывать `https://DOMAIN` (имя `.local` резолвится по Bonjour на маках, на Windows и Linux — если есть mDNS)
+или `https://LAN_IP`. `PUBLIC_URL` и URL сигнализации строятся из `DOMAIN`; если у второй машины нет mDNS,
+поставь в `DOMAIN` сам IP.
 
 ## Логи
 

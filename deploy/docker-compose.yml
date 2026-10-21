@@ -11,7 +11,8 @@ services:
     env_file: .env
     environment:
       PUBLIC_URL: https://${DOMAIN:?set DOMAIN in .env}
-      TURN_HOST: ${TURN_DOMAIN:?set TURN_DOMAIN in .env}
+      # Empty TURN_DOMAIN or TURN_SECRET: no TURN in iceServers.
+      TURN_HOST: ${TURN_DOMAIN:-}
       DATABASE_PATH: /data/maccheri.sqlite
     volumes:
       - controlplane-data:/data
@@ -43,7 +44,7 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
-      TURN_SECRET: ${TURN_SECRET:?set TURN_SECRET in .env}
+      TURN_SECRET: ${TURN_SECRET:-}
       TURN_DOMAIN: ${TURN_DOMAIN}
       TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-}
       TURN_MIN_PORT: ${TURN_MIN_PORT:-49160}
@@ -54,6 +55,7 @@ services:
     # Peers in private ranges are denied so the relay can't reach the server's own networks.
     command:
       - >-
+        [ -n "$$TURN_SECRET" ] || { echo "TURN_SECRET is required" >&2; exit 1; };
         exec turnserver -n --log-file=stdout --no-cli --no-tls --no-dtls
         --listening-port=3478 --fingerprint
         --use-auth-secret --static-auth-secret="$$TURN_SECRET" --realm="$$TURN_DOMAIN"
