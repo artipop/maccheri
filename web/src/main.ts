@@ -35,8 +35,11 @@ function errorText(e: unknown): string {
 
 const preferredTransport = (): VideoTransport => {
   const saved = params.get('video') ?? localStorage.getItem('maccheri.video')
-  if (saved === 'track' || saved === 'dataChannel') return saved
-  // WebCodecs everywhere it exists: no jitter buffer at all (see simstream/README.md).
+  // WebCodecs exists only in a secure context (https or localhost); without it only the track works.
+  if (saved === 'track' || (saved === 'dataChannel' && CanvasRenderer.supported)) return saved
+  // Measured (bench/simstream/RESULTS.md): WebCodecs is faster in Chromium, the track is faster in
+  // Firefox, Safari is even.
+  if (/Firefox\//.test(navigator.userAgent)) return 'track'
   return CanvasRenderer.supported ? 'dataChannel' : 'track'
 }
 
@@ -110,7 +113,7 @@ async function home() {
     try {
       const choice = devices.get(select.value)!
       const session = await api.createSession({ device: select.value === 'any' ? null : choice.device, hostID: choice.hostID ?? null })
-      void waitForSession(session, transport.value as VideoTransport)
+      void waitForSession(session, CanvasRenderer.supported ? transport.value as VideoTransport : 'track')
     } catch (e) {
       error.textContent = errorText(e)
       start.disabled = false

@@ -29,6 +29,11 @@ npm test             # vitest: протокол, задержка, клавиа�
 npm run build        # → dist/, его раздаёт control plane (PUBLIC_DIR)
 ```
 
+Для других машин в LAN и для Firefox нужен https. WebCodecs есть только в secure context, а Firefox
+со страницы `http://localhost` не устанавливает ICE. Поэтому с самоподписанным сертификатом:
+`DEV_HTTPS_CERT=dev.crt DEV_HTTPS_KEY=dev.key npm run dev`, хост — `simstream-peer … --control-plane https://<IP>:5173 --insecure`.
+Сертификат: `openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj /CN=dev -addext "subjectAltName=IP:<IP>" -keyout dev.key -out dev.crt`.
+
 Мок нужен, пока нет настоящего control plane, и для работы без него. Он принимает общий токен
 `dev` (`MOCK_SHARED_TOKEN`), любой код приглашения, `enroll`, `heartbeat`, `/agent/v1/work` и
 сигнализацию. Хост для него — `simstream-peer` (см. `simstream/README.md`, «Как проверить без агента»).
@@ -59,7 +64,7 @@ ICE-серверы мока задаёт `MOCK_ICE="stun:…,turn:user:pass@host
 node bench/latency.mjs --browser chrome --video dataChannel --taps 40     # /Applications/Google Chrome.app
 node bench/latency.mjs --browser chromium                                 # headless Chromium из кэша Playwright
 safaridriver -p 4444 & node bench/latency.mjs --browser safari            # нужен `safaridriver --enable`
-geckodriver -p 4444 & node bench/latency.mjs --browser firefox
+geckodriver -p 4444 & node bench/latency.mjs --browser firefox --url https://<IP>:5173/   # https, см. выше
 ```
 
 Скрипт входит, создаёт сессию, кликает мышью браузера в центр экрана (TapProbe меняет цвет) и печатает
