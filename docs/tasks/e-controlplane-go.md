@@ -91,6 +91,18 @@ Maccheri.app, веб-клиента и simstream-peer. Заодно встрои
 - Новые env: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` (из того же App), `GITHUB_APP_SLUG`, `DATABASE_URL`,
   `SESSION_SECRET` или ключ подписи `state`. Регистрацию App с callback- и setup-URL обновляет C.
 
+### Требования веб-клиента (D, уже в main)
+
+- `GET /auth/github/login` **всегда отвечает 3xx**: по этому клиент понимает, что сервер v2. Ответ 404
+  или страница означает v1.
+- `/invite/*` отдаёт `index.html` (как SPA-fallback) или 302 на `/?invite=<код>`.
+- Имена v2-фикстур, которые проверяет `web/test/api.test.ts`: `user-info-v2`, `invite-v2`, `team`, `teams`,
+  `create-team-request`, `team-member`, `team-members`, `create-invite-request`, `host-enrollment-code`,
+  `github-link`, `github-installation`, `github-installations`, `session-ready-v2`, `hosts-v2`,
+  `create-session-request-v2`.
+- Dev-мок `web/dev/mock-control-plane.ts` — рабочий пример ожидаемого поведения: CSRF 403,
+  enroll по коду, повторный код 401, `/github/setup`.
+
 ## Что сделать
 
 1. **Типы и фикстуры.** Go-типы для всех контрактов. Тест: каждая фикстура декодируется и кодируется обратно
