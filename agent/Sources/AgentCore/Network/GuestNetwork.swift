@@ -120,13 +120,14 @@ public final class GuestNetwork: @unchecked Sendable {
         }
     }
 
-    /// Listens on `127.0.0.1:hostPort` (0 picks a port) and relays each connection to `guestPort`.
+    /// Listens on `address:hostPort` (0 picks a port) and relays each connection to `guestPort`.
     /// Returns the bound port. The listener lives until ``stop()`` or ``stopForward(_:)``.
-    public func forward(guestPort: UInt16, hostPort: UInt16 = 0) throws -> UInt16 {
+    /// The agent only ever binds loopback; `maccheri-vm --forward` may open it to the LAN.
+    public func forward(guestPort: UInt16, hostPort: UInt16 = 0, on address: IPv4 = IPv4(127, 0, 0, 1)) throws -> UInt16 {
         let listener = socket(AF_INET, SOCK_STREAM, 0)
         guard listener >= 0 else { throw NetworkError.system("socket", errno) }
         SocketOptions.set(listener, SOL_SOCKET, SO_REUSEADDR, 1)
-        var address = IPv4(127, 0, 0, 1).sockaddr
+        var address = address.sockaddr
         address.sin_port = hostPort.bigEndian
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(listener, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
@@ -134,7 +135,7 @@ public final class GuestNetwork: @unchecked Sendable {
         guard bound == 0, listen(listener, 16) == 0 else {
             let code = errno
             close(listener)
-            throw NetworkError.system("bind 127.0.0.1:\(hostPort)", code)
+            throw NetworkError.system("bind \(IPv4(UInt32(bigEndian: address.sin_addr.s_addr))):\(hostPort)", code)
         }
         var length = socklen_t(MemoryLayout<sockaddr_in>.size)
         withUnsafeMutablePointer(to: &address) {

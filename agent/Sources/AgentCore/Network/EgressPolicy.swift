@@ -82,7 +82,7 @@ enum HostAddresses {
         var entry = list
         while let current = entry {
             if let address = current.pointee.ifa_addr, address.pointee.sa_family == sa_family_t(AF_INET) {
-                address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+                _ = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
                     result.insert(IPv4(UInt32(bigEndian: $0.pointee.sin_addr.s_addr)))
                 }
             }

@@ -8,7 +8,7 @@ import Foundation
 /// so the kernel does real TCP towards the internet.
 ///
 /// Everything here runs on ``GuestNetwork``'s queue.
-final class TCPFlow {
+final class TCPFlow: @unchecked Sendable {
     struct Key: Hashable {
         var guestPort: UInt16
         /// The address and port the guest thinks it talks to.

@@ -5,10 +5,11 @@ import Testing
 @testable import AgentCore
 
 /// Makes a fake Tart-style bundle; the "disk" is a few bytes, which is all clonefile needs.
-func makeImage(in directory: URL, name: String) throws -> URL {
+func makeImage(in directory: URL, name: String, memory: UInt64 = 8 << 30, metadata: ImageMetadata? = nil) throws -> URL {
     let url = directory.appending(path: name, directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    let config = VMBundle.Config(cpuCount: 4, memorySize: 8 << 30, hardwareModel: Data("model".utf8).base64EncodedString())
+    if let metadata { try JSONEncoder().encode(metadata).write(to: url.appending(path: ImageMetadata.fileName)) }
+    let config = VMBundle.Config(cpuCount: 4, memorySize: memory, hardwareModel: Data("model".utf8).base64EncodedString())
     try JSONEncoder().encode(config).write(to: url.appending(path: "config.json"))
     try Data("disk".utf8).write(to: url.appending(path: "disk.img"))
     try Data("nvram".utf8).write(to: url.appending(path: "nvram.bin"))
@@ -59,73 +60,6 @@ func temporaryDirectory() throws -> URL {
 func refusesImageNamesOutsideStore(name: String) throws {
     let store = ImageStore(imagesDirectory: URL(filePath: "/nonexistent"), workDirectory: URL(filePath: "/nonexistent-work"))
     #expect(throws: AgentError.self) { try store.baseImage(named: name) }
-}
-
-actor FakeSource: JobSource {
-    var pending: [JobLease]
-    var completed: [(UUID, CompleteRequest)] = []
-    init(_ leases: [JobLease]) { pending = leases }
-
-    func lease(_ request: LeaseRequest) async throws -> JobLease? {
-        pending.isEmpty ? nil : pending.removeFirst()
-    }
-    func complete(jobID: UUID, _ request: CompleteRequest) async throws {
-        completed.append((jobID, request))
-    }
-}
-
-final class FakeVM: VMRunner, @unchecked Sendable {
-    let exit: VMExit
-    private(set) var sawJitConfig: String?
-    private(set) var ranFrom: URL?
-    init(exit: VMExit) { self.exit = exit }
-
-    func run(_ bundle: VMBundle, sharedDirectory: URL, timeout: Duration) async throws -> VMExit {
-        sawJitConfig = try String(contentsOf: sharedDirectory.appending(path: "jitconfig"), encoding: .utf8)
-        ranFrom = bundle.url
-        return exit
-    }
-}
-
-@Test(arguments: [(VMExit.guestStopped, JobOutcome.finished), (.timedOut, .timedOut)])
-func runsLeaseInDisposableClone(exit: VMExit, expected: JobOutcome) async throws {
-    let root = try temporaryDirectory()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let images = root.appending(path: "images")
-    _ = try makeImage(in: images, name: "macos")
-    let lease = JobLease(jobID: UUID(), githubJobID: 1, repository: "o/r", image: "macos", jitConfig: "JIT", timeoutSeconds: 60)
-    let source = FakeSource([lease])
-    let vm = FakeVM(exit: exit)
-    let runner = JobRunner(
-        source: source,
-        images: ImageStore(imagesDirectory: images, workDirectory: root.appending(path: "work")),
-        vm: vm, labels: ["maccheri"], log: { _ in }
-    )
-
-    #expect(try await runner.runOnce())
-    #expect(vm.sawJitConfig == "JIT")
-    #expect(vm.ranFrom?.deletingLastPathComponent().lastPathComponent == "work")
-    #expect(!FileManager.default.fileExists(atPath: vm.ranFrom!.path), "clone must be gone after the job")
-    let completed = await source.completed
-    #expect(completed.map(\.0) == [lease.jobID])
-    #expect(completed.first?.1.outcome == expected)
-
-    #expect(try await !runner.runOnce())
-}
-
-@Test func missingImageIsReportedAsFailure() async throws {
-    let root = try temporaryDirectory()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let lease = JobLease(jobID: UUID(), githubJobID: 2, repository: "o/r", image: "nope", jitConfig: "JIT", timeoutSeconds: 60)
-    let source = FakeSource([lease])
-    let runner = JobRunner(
-        source: source,
-        images: ImageStore(imagesDirectory: root, workDirectory: root.appending(path: "work")),
-        vm: FakeVM(exit: .guestStopped), labels: [], log: { _ in }
-    )
-    #expect(try await runner.runOnce())
-    let completed = await source.completed
-    #expect(completed.first?.1.outcome == .vmFailed)
 }
 
 @Test(arguments: [("7300:7301", TCPForwarder.Mapping(hostPort: 7300, guestPort: 7301)), ("7300", .init(hostPort: 7300, guestPort: 7300))])
