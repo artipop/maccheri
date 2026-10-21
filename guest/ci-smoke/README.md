@@ -10,7 +10,7 @@ uploading a screenshot.
 ```sh
 cp -R guest/ci-smoke /tmp/maccheri-ci-smoke && cd /tmp/maccheri-ci-smoke
 git init -b main && git add -A && git commit -m "maccheri smoke test"
-# create an empty private repository on GitHub, install the team's GitHub App on it
+# create an empty private repository on GitHub, install the GitHub App on it from your team's page
 # (guest/github-app/README.md), then:
 git remote add origin git@github.com:<owner>/maccheri-ci-smoke.git && git push -u origin main
 ```
