@@ -5,31 +5,79 @@ stored in the directory passed to `maccheri-agent --images`. The agent APFS-clon
 so `--images` and `--work` must be on the same APFS volume. On the dev Mac that is the external SSD:
 `/Volumes/Dev/vm/{images,work}`, with `TART_HOME=/Volumes/Dev/vm/tart`.
 
+Next to `config.json` lies `maccheri.json` (`MaccheriProtocol.ImageMetadata`): runner labels, the
+simulator devices created in the image and the version of the guest daemon. The agent fills
+`HostCapacity` from it.
+
+```json
+{"labels": ["maccheri", "macos-27", "xcode-27.2"],
+ "devices": [{"deviceType": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+              "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-27-2"}],
+ "guestVersion": "20261021-26d28a0"}
+```
+
 Tart comes from https://github.com/openai/tart/releases (`~/.local/bin/tart`). The Homebrew tap
 `cirruslabs/cli` no longer installs with current Homebrew.
 
-## `macos-27-xcode-27.2`
+## Building an image
 
-1. `tart clone ghcr.io/cirruslabs/macos-golden-gate-vanilla:27.0 gg-vanilla`. It is about 29 GB compressed.
-   The image comes with user `admin`/`admin`, SSH, auto-login and passwordless sudo.
-2. `tart clone gg-vanilla macos-27-sim && tart set macos-27-sim --disk-size 90`.
-   The guest grows its APFS container by itself on the next boot.
-3. Stage the host's Xcode and simulator runtime:
-   - pack Xcode as a tarball, because virtiofs breaks symlinks during `ditto`:
-     `tar -cf staging/Xcode-beta.tar -C /Applications Xcode-beta.app`;
-   - copy the runtime dmg from
-     `/System/Library/AssetsV2/com_apple_MobileAsset_iOSSimulatorRuntime/*/AssetData/Restore/*.dmg`.
-4. `tart run macos-27-sim --no-graphics --dir=staging:<staging>:ro`, then in the guest:
-   ```
-   sudo tar -xf "/Volumes/My Shared Files/staging/Xcode-beta.tar" -C /Applications
-   sudo xcode-select -s /Applications/Xcode-beta.app
-   sudo xcodebuild -license accept && sudo xcodebuild -runFirstLaunch
-   xcrun simctl runtime add "/Volumes/My Shared Files/staging/iOS_27.2_24B5089g.dmg"
-   ```
-5. Shut the guest down, then `cp -c -R $TART_HOME/vms/macos-27-sim <images>/macos-27-xcode-27.2`.
-6. Check it: `maccheri-vm --images <images> --work <work> --image macos-27-xcode-27.2`.
+```sh
+images/build.sh                       # → /Volumes/Dev/vm/images/macos-27-xcode-27.2-v<N>
+images/build.sh --devices "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro,com.apple.CoreSimulator.SimRuntime.iOS-27-2 \
+                           com.apple.CoreSimulator.SimDeviceType.iPhone-17,com.apple.CoreSimulator.SimRuntime.iOS-27-2"
+```
 
-Still to do for CI jobs:
-- install the GitHub Actions runner into `/Users/admin/actions-runner`;
-- install `guest/runner/maccheri-runner.sh` and `dev.maccheri.runner.plist`;
-- allow `admin` to run `shutdown` without a password. The vanilla image already has passwordless sudo.
+It takes the dev Mac's VM lock (`docs/contracts.md`) for the whole run and:
+
+1. on the host, prepares `$VM_ROOT/staging` (kept and reused by the next build):
+   - the Xcode `xcode-select -p` points to, as a tarball: virtiofs breaks symlinks during `ditto`;
+   - the iOS runtime dmg of the first device, from `xcrun simctl runtime list`;
+   - the latest GitHub actions runner for osx-arm64, checked against the SHA-256 in its release notes;
+   - release builds of `maccheri-guestd` and `simstream`, the LaunchAgent and `maccheri.json`,
+     in `staging/<name>/`;
+2. clones `--from` (default `macos-27-vanilla`) into `$TART_HOME/vms/maccheri-build-<name>`, sets
+   a random MAC and a 90 GB disk;
+3. boots the clone with the staging directory shared read-only and runs `images/guest-setup.sh` over
+   SSH: grows the APFS container, turns off Spotlight, software updates, sleep, the screen saver and
+   screen lock, installs Xcode (license, first launch, developer mode) and the runtime, unpacks the
+   runner into `~/actions-runner`, installs the guest daemon (`guest/README.md`) and simstream,
+   creates the devices and warms them up: the first boot, then a cold launch of Safari, Maps,
+   Calendar, Settings and Photos, which is where the simulator draws its black screen for seconds
+   (`simstream/README.md`);
+4. shuts the guest down and moves the VM into `<images>/<name>` with `maccheri.json`.
+
+The name is `macos-<os>-xcode-<xcode>-v<N>` with the next free `N`, or `--name`. Existing images
+are never touched. A failed build is deleted unless `--keep-failed` is given, in which case the
+VM stays in Tart (`tart run maccheri-build-<name>`). Logs: `staging/<name>/guest-setup.log`.
+
+The base, `macos-27-vanilla`, is Cirrus Labs' image (user `admin`/`admin`, SSH, auto-login and
+passwordless sudo), about 29 GB compressed. It was pulled once and is not part of the build:
+
+```sh
+tart clone ghcr.io/cirruslabs/macos-golden-gate-vanilla:27.0 gg-vanilla
+cp -c -R $TART_HOME/vms/gg-vanilla /Volumes/Dev/vm/images/macos-27-vanilla
+```
+
+## Updating
+
+- **New Xcode or runtime:** install it on the host, `xcode-select -s` it and run `build.sh`.
+  The private APIs of simstream are tied to the Xcode version: check
+  `simstream/Sources/SimulatorBridge/PrivateAPI.swift`. The old Xcode tarball in staging (about
+  10 GB) can then be deleted.
+- **New guest daemon or simstream:** run `build.sh` again; `guestVersion` follows the commit.
+- **New macOS:** pull a new vanilla image and pass `--from`.
+
+## Checking an image
+
+```sh
+agent/scripts/build.sh
+maccheri-vm --images /Volumes/Dev/vm/images --work /Volumes/Dev/vm/work --image macos-27-xcode-27.2-v1
+```
+
+Then write `session.json` (see `guest/README.md`) into the `shared/` directory of the clone that
+`maccheri-vm` prints.
+
+## Older images
+
+`macos-27-vanilla` and `macos-27-xcode-27.2` were built by hand. The latter has Xcode and the runtime
+but neither the runner nor the guest daemon.
