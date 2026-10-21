@@ -12,6 +12,18 @@ let samples: [SimStreamMessage] = [
     .requestKeyframe,
     .ping(0xdead_beef_cafe),
     .pong(42),
+    .key(KeyEvent(usage: 0x04, down: true)),
+    .key(KeyEvent(usage: 0xe1, down: false)),
+    .button(ButtonEvent(button: .home, down: true)),
+    .button(ButtonEvent(button: .lock, down: false)),
+    .orientation(.landscapeLeft),
+    .installBegin(name: "Probe.app.zip", size: 12_345_678),
+    .installChunk(Data(repeating: 0xab, count: 300)),
+    .installEnd,
+    .installStatus(InstallStatus(state: .failed, message: "simctl install: exit 1")),
+    .streamConfig(StreamConfig(video: .dataChannel)),
+    .frameInfo(FrameInfo(rtpTimestamp: 0xffff_fff0, isKeyframe: true, inputAck: 12, ackAgeMicros: 18_000, encodeMicros: 6_500)),
+    .videoChunk(VideoChunk(frame: 9, index: 2, count: 3, bytes: Data([1, 2, 3]))),
 ]
 
 @Test(arguments: samples)
@@ -77,4 +89,18 @@ func reassemblesArbitraryChunks(chunkSize: Int) throws {
 @Test func rejectsBadPhaseAndTrailingBytes() {
     #expect(throws: SimStreamError.self) { try SimStreamMessage(body: Data([3, 0, 0, 0, 1, 9, 0, 0, 0, 0, 0, 0, 0, 0])) }
     #expect(throws: SimStreamError.self) { try SimStreamMessage(body: Data([4, 0])) }
+}
+
+@Test(arguments: samples)
+func bodyRoundTrip(message: SimStreamMessage) throws {
+    #expect(try SimStreamMessage(body: message.encodedBody()) == message)
+}
+
+@Test func slicesVideoIntoChunks() throws {
+    let body = SimStreamMessage.video(samples.compactMap { if case .video(let v) = $0 { v } else { nil } }[0]).encodedBody()
+    let chunks = VideoChunk.slice(body, frame: 5, size: 100)
+    #expect(chunks.count == (body.count + 99) / 100)
+    #expect(chunks.allSatisfy { $0.frame == 5 && Int($0.count) == chunks.count })
+    #expect(chunks.reduce(Data()) { $0 + $1.bytes } == body)
+    #expect(VideoChunk.slice(Data(), frame: 1, size: 100).count == 1)
 }
