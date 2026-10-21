@@ -6,3 +6,4 @@ xcuserdata/
 *.xcresult
 __pycache__/
 .venv/
+viewer/build/

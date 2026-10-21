@@ -1,0 +1,65 @@
+{
+  "default-configuration": "Release",
+  "configurations": [
+    { "name": "Debug", "file": { "anchor": "Config", "relative-path": "Debug.xcconfig" } },
+    { "name": "Release", "file": { "anchor": "Config", "relative-path": "Release.xcconfig" } },
+  ],
+  "localizations": {
+    "development": "en",
+  },
+  "packages": [
+    {
+      "kind": "local",
+      "path": "../simstream",
+    },
+  ],
+  "files": [
+    { "kind": "folder", "path": "MaccheriViewer", "target-membership": [ "MaccheriViewer" ] },
+    { "kind": "folder", "path": "Config" },
+  ],
+  "targets": [
+    {
+      "name": "MaccheriViewer",
+      "id": "5649455745523031",
+      "product-type": "application",
+      "build-phases": [
+        "compile-sources",
+        "frameworks",
+        "resources",
+      ],
+      "package-product-members": [
+        {
+          "package": "simstream",
+          "product-name": "SimStreamClient",
+          "build-phase": { "build-phase": "frameworks" },
+        },
+      ],
+      "build-settings": {
+        "CODE_SIGN_IDENTITY": "-",
+        "CODE_SIGN_STYLE": "Manual",
+        "COMBINE_HIDPI_IMAGES": "YES",
+        "CURRENT_PROJECT_VERSION": "1",
+        "ENABLE_APP_SANDBOX": "NO",
+        "ENABLE_HARDENED_RUNTIME": "YES",
+        "GENERATE_INFOPLIST_FILE": "YES",
+        "INFOPLIST_KEY_CFBundleDisplayName": "Maccheri Viewer",
+        "INFOPLIST_KEY_LSApplicationCategoryType": "public.app-category.developer-tools",
+        "INFOPLIST_KEY_NSLocalNetworkUsageDescription": "Maccheri Viewer connects to a remote iOS Simulator on your local network.",
+        "MARKETING_VERSION": "0.1.0",
+        "PRODUCT_BUNDLE_IDENTIFIER": "dev.maccheri.viewer",
+        "PRODUCT_NAME": "$(TARGET_NAME)",
+      },
+    },
+  ],
+  "build-settings": {
+    "CLANG_ENABLE_MODULES": "YES",
+    "ENABLE_STRICT_OBJC_MSGSEND": "YES",
+    "ENABLE_USER_SCRIPT_SANDBOXING": "YES",
+    "MACOSX_DEPLOYMENT_TARGET": "15.0",
+    "SDKROOT": "macosx",
+    "SWIFT_APPROACHABLE_CONCURRENCY": "YES",
+    "SWIFT_DEFAULT_ACTOR_ISOLATION": "MainActor",
+    "SWIFT_VERSION": "6.0",
+  },
+  "products-group": null,
+}
