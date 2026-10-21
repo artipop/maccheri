@@ -1,9 +1,10 @@
-// Maccheri web client: sign in with an invite, pick a Mac and a device, work with the simulator.
+// Maccheri web client: sign in (GitHub and teams, or v1's invite/shared token), pick a Mac and a
+// device, work with the simulator.
 // Self-contained (one page, one bundle, no server rendering) so it can later live in a VS Code
 // webview or a native wrapper.
 
 import './style.css'
-import { API, APIError, deviceName, iPhone17Pro, type DeviceSpec, type HostInfo, type SessionInfo } from './api'
+import { API, APIError, atLeast, deviceName, iPhone17Pro, type DeviceSpec, type GitHubInstallation, type HostInfo, type SessionInfo, type Team, type TeamMember, type TeamRole, type UserInfo } from './api'
 import { hidUsage } from './keyboard'
 import { percentile } from './latency'
 import type { Hello, Orientation, VideoTransport } from './protocol'
@@ -41,7 +42,52 @@ function errorText(e: unknown): string {
 const preferredTransport = (): VideoTransport =>
   params.get('video') === 'dataChannel' && CanvasRenderer.supported ? 'dataChannel' : 'track'
 
-// MARK: - Sign in
+// MARK: - Start
+
+/**
+ * Which accounts the control plane has decides the first screen. A v1 token in `localStorage` means
+ * v1. Otherwise a cookie session answers `/v1/me` with `teams` (v2, signed in); without one, v2
+ * offers GitHub sign-in, and v1 (`/auth/github/login` is 404) the token form.
+ */
+async function home(): Promise<void> {
+  if (api.token) return v1Home()
+  try {
+    const me = await api.me()
+    if (me.teams) return teamsHome(me)
+  } catch (e) {
+    if (!(e instanceof APIError) || (e.status !== 401 && e.status !== 404)) {
+      return show(h('div', { class: 'card narrow' }, h('p', { class: 'error' }, errorText(e)), retryButton(home)))
+    }
+  }
+  const v2 = await api.hasGitHubSignIn().catch(() => false)
+  if (v2) githubSignIn()
+  else signIn()
+}
+
+/** An invite to accept: `/invite/<code>` (the link in `Invite.url`) or `?invite=<code>`. */
+function pendingInvite(): string | null {
+  const m = location.pathname.match(/\/invite\/([^/]+)\/?$/)
+  return m ? decodeURIComponent(m[1]) : params.get('invite')
+}
+
+function forgetInvite() {
+  params.delete('invite')
+  const query = params.toString()
+  history.replaceState(null, '', location.pathname.replace(/invite\/[^/]+\/?$/, '') + (query ? `?${query}` : ''))
+}
+
+// MARK: - Sign in, v2
+
+function githubSignIn() {
+  const invited = pendingInvite() !== null
+  const login = h('a', { class: 'button', href: api.githubLoginURL(location.pathname + location.search) }, 'Войти через GitHub')
+  show(h('div', { class: 'card narrow' },
+    h('h1', {}, 'Maccheri'),
+    h('p', { class: 'muted' }, invited ? 'Вас пригласили в команду. Войдите через GitHub, чтобы присоединиться.' : 'Симуляторы iOS на маках вашей команды'),
+    login))
+}
+
+// MARK: - Sign in, v1
 
 function signIn(message = '') {
   const code = h('input', { name: 'code', placeholder: 'Код приглашения или токен команды', required: '', autocomplete: 'off', value: params.get('invite') ?? params.get('token') ?? '' })
@@ -72,9 +118,9 @@ function signIn(message = '') {
   show(form)
 }
 
-// MARK: - Hosts
+// MARK: - Hosts, v1
 
-async function home() {
+async function v1Home(): Promise<void> {
   let me: { name: string }, hosts: HostInfo[]
   try {
     // Without users there is no /v1/me; the name typed at sign-in stands in.
@@ -85,6 +131,203 @@ async function home() {
     return show(h('div', { class: 'card narrow' }, h('p', { class: 'error' }, errorText(e)), retryButton(home)))
   }
 
+  const signOut = h('button', { type: 'button', class: 'link' }, 'Выйти')
+  signOut.onclick = () => { api.token = null; signIn() }
+  show(h('div', { class: 'card' },
+    h('header', {}, h('h1', {}, 'Maccheri'), h('span', { class: 'muted' }, me.name, ' · '), signOut),
+    h('h2', {}, 'Маки команды'), hostList(hosts),
+    ...sessionStarter(hosts)))
+}
+
+// MARK: - Teams, v2
+
+const roleText: Record<TeamRole, string> = { member: 'участник', admin: 'админ', owner: 'владелец' }
+const teamKey = 'maccheri.team'
+
+async function teamsHome(me: UserInfo): Promise<void> {
+  let teams = me.teams ?? []
+  let notice = ''
+  const invite = pendingInvite()
+  if (invite !== null) {
+    forgetInvite()
+    try {
+      const joined = await api.acceptInvite(invite)
+      localStorage.setItem(teamKey, joined.id)
+      teams = [...teams.filter((t) => t.id !== joined.id), joined]
+      notice = `Вы в команде «${joined.name}»`
+    } catch (e) {
+      notice = `Приглашение не принято: ${errorText(e)}`
+    }
+  }
+
+  const header = h('header', {}, h('h1', {}, 'Maccheri'))
+  if (me.avatarURL) header.append(h('img', { class: 'avatar', src: me.avatarURL, alt: '' }))
+  header.append(h('span', { class: 'muted' }, me.login ?? me.name, ' · '), signOutButton())
+
+  if (teams.length === 0) return show(createTeamCard(header, notice, true))
+
+  const team = teams.find((t) => t.id === localStorage.getItem(teamKey)) ?? teams[0]
+  const admin = atLeast(team.role, 'admin')
+  let hosts: HostInfo[], members: TeamMember[], installations: GitHubInstallation[] | null
+  try {
+    ;[hosts, members, installations] = await Promise.all([
+      api.teamHosts(team.id), api.members(team.id),
+      admin ? api.githubInstallations(team.id).catch(() => null) : Promise.resolve(null),
+    ])
+  } catch (e) {
+    if (e instanceof APIError && e.status === 401) return home()
+    return show(h('div', { class: 'card narrow' }, h('p', { class: 'error' }, errorText(e)), retryButton(home)))
+  }
+
+  // Team switcher; its last option makes another team.
+  const picker = h('select', { name: 'team', title: 'Команда' })
+  for (const t of teams) picker.append(h('option', { value: t.id }, `${t.name} · ${roleText[t.role]}`))
+  picker.append(h('option', { value: 'new' }, 'Новая команда…'))
+  picker.value = team.id
+  picker.onchange = () => {
+    if (picker.value === 'new') return show(createTeamCard(header, '', false))
+    localStorage.setItem(teamKey, picker.value)
+    void home()
+  }
+  header.insertBefore(picker, header.children[1])
+
+  const card = h('div', { class: 'card' }, header)
+  if (notice) card.append(h('p', { class: 'notice' }, notice))
+  card.append(h('h2', {}, 'Маки команды'), hostList(hosts), ...sessionStarter(hosts, team.id))
+  if (admin) card.append(addHostPanel(team))
+
+  card.append(h('h2', {}, 'Участники'), memberList(members))
+  if (admin) card.append(invitePanel(team))
+
+  if (admin) card.append(h('h2', {}, 'GitHub'), githubPanel(team, installations))
+  show(card)
+}
+
+function signOutButton() {
+  const b = h('button', { type: 'button', class: 'link' }, 'Выйти')
+  b.onclick = async () => {
+    await api.logout().catch(() => {})
+    void home()
+  }
+  return b
+}
+
+function createTeamCard(header: HTMLElement, notice: string, first: boolean) {
+  const name = h('input', { name: 'team', placeholder: 'Название команды', required: '' })
+  const error = h('p', { class: 'error' })
+  const form = h('form', { class: 'row' }, name, h('button', { type: 'submit' }, 'Создать команду'))
+  form.onsubmit = async (e) => {
+    e.preventDefault()
+    try {
+      const team = await api.createTeam({ name: name.value.trim() })
+      localStorage.setItem(teamKey, team.id)
+      void home()
+    } catch (err) {
+      error.textContent = errorText(err)
+    }
+  }
+  const card = h('div', { class: 'card' }, header)
+  if (notice) card.append(h('p', { class: 'notice' }, notice))
+  card.append(h('h2', {}, first ? 'Вы пока не в команде' : 'Новая команда'),
+    h('p', { class: 'muted' }, 'Создайте команду и подключите к ней свои маки. Чтобы попасть в чужую команду, откройте ссылку-приглашение от её админа.'),
+    form, error)
+  if (!first) card.append(retryButton(home, 'Назад'))
+  return card
+}
+
+function memberList(members: TeamMember[]) {
+  const list = h('ul', { class: 'members' })
+  for (const m of members) {
+    const li = h('li', {})
+    if (m.avatarURL) li.append(h('img', { class: 'avatar', src: m.avatarURL, alt: '' }))
+    li.append(h('strong', {}, m.name || m.login), h('span', { class: 'muted' }, ` @${m.login} · ${roleText[m.role]}`))
+    list.append(li)
+  }
+  return list
+}
+
+/** Invite link with a role, for admins and owners. */
+function invitePanel(team: Team) {
+  const role = h('select', { name: 'role', title: 'Роль' }, h('option', { value: 'member' }, 'участником'), h('option', { value: 'admin' }, 'админом'))
+  const create = h('button', { type: 'button', class: 'secondary' }, 'Пригласить')
+  const result = h('div', { class: 'issued' })
+  create.onclick = async () => {
+    try {
+      const invite = await api.createTeamInvite(team.id, { role: role.value as TeamRole })
+      const url = invite.url ?? `${location.origin}${location.pathname}?invite=${encodeURIComponent(invite.code)}`
+      result.replaceChildren(copyField(url), h('p', { class: 'muted' }, `Ссылка одноразовая, действует до ${dateText(invite.expiresAt)}. Откройте её под своим GitHub, чтобы вступить.`))
+    } catch (e) {
+      result.replaceChildren(h('p', { class: 'error' }, errorText(e)))
+    }
+  }
+  return h('div', {}, h('div', { class: 'row' }, h('span', { class: 'label' }, 'Пригласить в команду'), role, create), result)
+}
+
+/** One-time enrollment code for Maccheri.app on a new Mac. */
+function addHostPanel(team: Team) {
+  const create = h('button', { type: 'button', class: 'secondary' }, 'Добавить мак')
+  const result = h('div', { class: 'issued' })
+  create.onclick = async () => {
+    try {
+      const code = await api.createHostCode(team.id)
+      const server = api.base || location.origin
+      result.replaceChildren(copyField(code.code), h('p', { class: 'muted' },
+        `На маке, который отдаёте команде, откройте Maccheri.app → Settings: адрес сервера ${server}, этот код — в поле Token. `,
+        `Код одноразовый, действует до ${dateText(code.expiresAt)}. Мак появится в списке выше, как только подключится.`))
+    } catch (e) {
+      result.replaceChildren(h('p', { class: 'error' }, errorText(e)))
+    }
+  }
+  return h('div', {}, h('div', { class: 'row' }, create), result)
+}
+
+function githubPanel(team: Team, installations: GitHubInstallation[] | null) {
+  const list = h('ul', { class: 'members' })
+  for (const i of installations ?? []) {
+    list.append(h('li', {}, h('strong', {}, i.account), h('span', { class: 'muted' }, i.repositorySelection === 'all' ? ' · все репозитории' : ' · выбранные репозитории')))
+  }
+  if (installations === null) list.append(h('li', { class: 'muted' }, 'Не удалось загрузить установки'))
+  else if (installations.length === 0) list.append(h('li', { class: 'muted' }, 'GitHub App ещё не установлен: CI-задачи команды не запускаются'))
+  const link = h('button', { type: 'button', class: 'secondary' }, 'Подключить GitHub')
+  const error = h('p', { class: 'error' })
+  link.onclick = async () => {
+    try {
+      location.href = (await api.linkGitHub(team.id)).url
+    } catch (e) {
+      error.textContent = errorText(e)
+    }
+  }
+  return h('div', {}, list, h('div', { class: 'row' }, link), error)
+}
+
+function copyField(value: string) {
+  const input = h('input', { readonly: '', value })
+  input.onfocus = () => input.select()
+  const copy = h('button', { type: 'button', class: 'secondary' }, 'Копировать')
+  copy.onclick = async () => {
+    try { await navigator.clipboard.writeText(value); copy.textContent = 'Скопировано' } catch { input.focus() }
+  }
+  return h('div', { class: 'row copy' }, input, copy)
+}
+
+const dateText = (iso: string) => new Date(iso).toLocaleString('ru', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+
+// MARK: - Hosts and a new session, both
+
+function hostList(hosts: HostInfo[]) {
+  const list = h('ul', { class: 'hosts' })
+  for (const host of hosts) {
+    const capacity = host.capacity
+    list.append(h('li', { class: host.online ? '' : 'offline' },
+      h('strong', {}, host.name), ` · ${host.ownerName} · ${host.hardware.chip}, ${Math.round(host.hardware.memoryBytes / 2 ** 30)} ГБ`,
+      h('span', { class: 'muted' }, host.online ? ` · свободно ${capacity?.freeSlots ?? 0}, прогрето ${capacity?.warmVMs ?? 0}` : ' · не в сети')))
+  }
+  if (hosts.length === 0) list.append(h('li', { class: 'muted' }, 'Пока ни одного Mac в команде'))
+  return list
+}
+
+/** Device and video pickers and «Новая сессия»; `teamID` in v2. */
+function sessionStarter(hosts: HostInfo[], teamID?: string): HTMLElement[] {
   const online = hosts.filter((x) => x.online)
   const devices = new Map<string, { device: DeviceSpec; hostID?: string }>()
   devices.set('any', { device: iPhone17Pro })
@@ -109,33 +352,18 @@ async function home() {
     error.textContent = ''
     try {
       const choice = devices.get(select.value)!
-      const session = await api.createSession({ device: select.value === 'any' ? null : choice.device, hostID: choice.hostID ?? null })
+      const session = await api.createSession({ device: select.value === 'any' ? null : choice.device, hostID: choice.hostID ?? null, ...(teamID ? { teamID } : {}) })
       void waitForSession(session, CanvasRenderer.supported ? transport.value as VideoTransport : 'track')
     } catch (e) {
       error.textContent = errorText(e)
       start.disabled = false
     }
   }
-
-  const list = h('ul', { class: 'hosts' })
-  for (const host of hosts) {
-    const capacity = host.capacity
-    list.append(h('li', { class: host.online ? '' : 'offline' },
-      h('strong', {}, host.name), ` · ${host.ownerName} · ${host.hardware.chip}, ${Math.round(host.hardware.memoryBytes / 2 ** 30)} ГБ`,
-      h('span', { class: 'muted' }, host.online ? ` · свободно ${capacity?.freeSlots ?? 0}, прогрето ${capacity?.warmVMs ?? 0}` : ' · не в сети')))
-  }
-  if (hosts.length === 0) list.append(h('li', { class: 'muted' }, 'Пока ни одного Mac в команде'))
-
-  const signOut = h('button', { type: 'button', class: 'link' }, 'Выйти')
-  signOut.onclick = () => { api.token = null; signIn() }
-  show(h('div', { class: 'card' },
-    h('header', {}, h('h1', {}, 'Maccheri'), h('span', { class: 'muted' }, me.name, ' · '), signOut),
-    h('h2', {}, 'Маки команды'), list,
-    h('div', { class: 'row' }, select, transport, start), error))
+  return [h('div', { class: 'row' }, select, transport, start), error]
 }
 
-function retryButton(action: () => void) {
-  const b = h('button', { type: 'button' }, 'Повторить')
+function retryButton(action: () => void, label = 'Повторить') {
+  const b = h('button', { type: 'button' }, label)
   b.onclick = action
   return b
 }
@@ -381,5 +609,4 @@ function statsText(s: Stats): string {
   ].join('\n')
 }
 
-if (api.token) void home()
-else signIn()
+void home()

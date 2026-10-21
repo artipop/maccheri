@@ -84,12 +84,19 @@ async function waitFor(js, timeout = 60000) {
 }
 
 try {
-  const url = `${o.url}?video=${o.video}&invite=bench`
+  const url = `${o.url}?video=${o.video}`
   await b.open(url)
   await b.eval(`localStorage.removeItem('maccheri.token')`)
-  await b.open(url)
-  await waitFor(`!!document.querySelector('form')`)
-  await b.eval(`(() => { document.querySelector('input[name=name]').value = ${JSON.stringify(o.browser)}; document.querySelector('form button[type=submit]').click() })()`)
+  await b.open(`${url}&invite=bench`)
+  await waitFor(`!!document.querySelector('form, a.button')`)
+  if (await b.eval(`!!document.querySelector('a.button')`)) {
+    // Accounts v2: «Войти через GitHub»; the dev mock's stand-in for GitHub asks for a login (`dev` owns «Dev»).
+    await b.eval(`document.querySelector('a.button').click()`)
+    await waitFor(`location.pathname === '/auth/github/mock' && !!document.querySelector('form')`)
+    await b.eval(`document.querySelector('form').submit()`)
+  } else {
+    await b.eval(`(() => { document.querySelector('input[name=name]').value = ${JSON.stringify(o.browser)}; document.querySelector('form button[type=submit]').click() })()`)
+  }
   await waitFor(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Новая сессия')`)
   await b.eval(`[...document.querySelectorAll('button')].find((b) => b.textContent === 'Новая сессия').click()`)
   try {

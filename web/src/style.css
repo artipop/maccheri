@@ -34,6 +34,15 @@ button.danger { background: var(--danger); border-color: var(--danger); }
 .hosts { list-style: none; padding: 0; margin: 0; }
 .hosts li { padding: 8px 0; border-bottom: 1px solid var(--border); }
 .hosts li.offline { opacity: .5; }
+a.button { display: block; text-align: center; text-decoration: none; padding: 8px 12px; border-radius: 8px; background: var(--accent); color: white; }
+.card header select { padding: 4px 8px; }
+.avatar { width: 20px; height: 20px; border-radius: 50%; vertical-align: middle; margin-right: 6px; }
+.notice { background: var(--bg); border-radius: 8px; padding: 8px 12px; margin: 12px 0 0; }
+.members { list-style: none; padding: 0; margin: 0; }
+.members li { padding: 6px 0; }
+.row .label { align-self: center; }
+.copy input { flex: 1; min-width: 200px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.issued p { margin: 6px 0 0; font-size: 13px; }
 
 .session { flex: 1; display: grid; grid-template-rows: auto 1fr; height: 100vh; background: var(--stage); position: relative; }
 .toolbar { display: flex; gap: 6px; padding: 8px; align-items: center; background: var(--card); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
