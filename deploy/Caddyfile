@@ -3,6 +3,16 @@
 # as plain TURN over TCP (turns:TURN_DOMAIN:443); everything else goes on to HTTP.
 {
 	email {$ACME_EMAIL}
+	# Requests whose Host doesn't match a site's logger exactly (e.g. different letter case) are
+	# logged here; keep signaling tokens out of it as well.
+	log default {
+		output stderr
+		format filter {
+			request>uri query {
+				replace token REDACTED
+			}
+		}
+	}
 	servers :443 {
 		listener_wrappers {
 			layer4 {

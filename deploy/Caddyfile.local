@@ -4,6 +4,16 @@
 {
 	local_certs
 	skip_install_trust
+	# Requests whose Host doesn't match a site's logger exactly (e.g. different letter case) are
+	# logged here; keep signaling tokens out of it as well.
+	log default {
+		output stderr
+		format filter {
+			request>uri query {
+				replace token REDACTED
+			}
+		}
+	}
 	# Clients that connect by IP send no SNI; serve the LAN_IP certificate to them.
 	default_sni {$LAN_IP}
 }

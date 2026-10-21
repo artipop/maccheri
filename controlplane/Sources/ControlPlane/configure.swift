@@ -8,6 +8,11 @@ func configure(_ app: Application, settings: Settings, provisioner: (any RunnerP
     ContentConfiguration.global.use(encoder: JSONEncoder.custom(dates: .iso8601), for: .json)
     ContentConfiguration.global.use(decoder: JSONDecoder.custom(dates: .iso8601), for: .json)
 
+    // Same as Vapor's defaults, but errors are logged without the query string.
+    app.middleware = Middlewares()
+    app.middleware.use(RouteLoggingMiddleware(logLevel: .info))
+    app.middleware.use(ErrorMiddleware.redacting(environment: app.environment))
+
     let provisioner = provisioner ?? settings.github.map { GitHubAppProvisioner(credentials: $0, client: app.client) }
     if provisioner == nil {
         app.logger.notice("GitHub App is not configured; CI jobs are not handed out")
