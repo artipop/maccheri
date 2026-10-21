@@ -208,7 +208,7 @@ function runSession(info: SessionInfo, transport: VideoTransport) {
   })
 
   // Layout: fit the (possibly rotated) screen into the stage.
-  const rotation = (): number => ({ portrait: 0, landscapeLeft: 90, portraitUpsideDown: 180, landscapeRight: -90 })[orientation]
+  const rotation = (): number => ({ portrait: 0, landscapeLeft: -90, portraitUpsideDown: 180, landscapeRight: 90 })[orientation]
   function layout() {
     const quarter = Math.abs(rotation()) === 90
     const w = quarter ? videoSize.height : videoSize.width
