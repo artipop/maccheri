@@ -44,7 +44,7 @@ final class HostModel {
 
     // MARK: Enrollment
 
-    /// The error of the last ``enroll(controlPlane:token:)``, shown next to the form.
+    /// The error of the last ``enroll(controlPlane:secret:)``, shown next to the form.
     private(set) var enrollmentError: String?
 
     /// `maccheri.example.com` or `http://192.168.1.10:8080/` → a base URL without a trailing slash.
@@ -57,18 +57,19 @@ final class HostModel {
         return url
     }
 
-    /// Registers this Mac with the team's control plane and starts taking work.
-    func enroll(controlPlane: String, token: String) async {
+    /// Registers this Mac with the team's control plane and starts taking work. `secret` is what the
+    /// owner pasted: a team's enrollment code (`hc_…`) or, for a v1 server, its shared token.
+    func enroll(controlPlane: String, secret: String) async {
         guard let url = Self.controlPlaneURL(controlPlane) else {
             enrollmentError = String(localized: "Enter the server address, e.g. maccheri.example.com")
             return
         }
-        let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        let secret = EnrollmentSecret(secret)
         enrollmentError = nil
         do {
             let request = HostEnrollRequest(name: HostInventory.computerName, hardware: HostInventory.hardware())
-            let enrollment = try await ControlPlaneClient.enroll(baseURL: url, userToken: token, request)
-            let credentials = AgentCredentials(controlPlane: url, hostID: enrollment.hostID, agentToken: enrollment.agentToken)
+            let enrollment = try await ControlPlaneClient.enroll(baseURL: url, secret: secret, request)
+            let credentials = AgentCredentials(controlPlane: url, enrollment: enrollment)
             try credentials.save()
             self.credentials = credentials
             settings.controlPlane = url.absoluteString
@@ -76,12 +77,16 @@ final class HostModel {
             start()
         } catch {
             settings.controlPlane = url.absoluteString
-            enrollmentError = Self.explain(error, url: url)
+            enrollmentError = Self.explain(error, url: url, secret: secret)
         }
     }
 
-    private static func explain(_ error: any Error, url: URL) -> String {
+    private static func explain(_ error: any Error, url: URL, secret: EnrollmentSecret) -> String {
         switch error {
+        case ControlPlaneError.unauthorized where secret.isCode:
+            return String(localized: "The server did not accept the code. Codes work once and expire soon: ask your team's admin for a new one.")
+        case let ControlPlaneError.http(status, _) where secret.isCode && [400, 404, 410].contains(status):
+            return String(localized: "The code is wrong or has expired (\(status)). Ask your team's admin for a new one.")
         case ControlPlaneError.unauthorized:
             return String(localized: "The server did not accept the token.")
         case let ControlPlaneError.http(status, _) where status == 404:

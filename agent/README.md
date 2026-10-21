@@ -11,13 +11,17 @@ single-use macOS VM.
 ```sh
 scripts/build.sh                       # builds and signs with the virtualization entitlement
 B=.build/out/Products/Debug            # or: swift build --show-bin-path
-$B/maccheri-agent enroll --control-plane https://maccheri.example.com --user-token TOKEN
+$B/maccheri-agent enroll --control-plane https://maccheri.example.com --code hc_…   # v2: team code
+$B/maccheri-agent enroll --control-plane https://maccheri.example.com --user-token TOKEN  # v1: shared token
 $B/maccheri-agent run --images /Volumes/Dev/vm/images --work /Volumes/Dev/vm/work
 $B/maccheri-vm --images /Volumes/Dev/vm/images --work /Volumes/Dev/vm/work --image NAME --forward 2222:22
 ```
 
-`enroll` stores the agent token in the login keychain (service `dev.maccheri.agent`), `run` reads it
-from there. `--control-plane URL --token TOKEN` skips the keychain.
+A team admin creates the code in the web client (`POST /v1/teams/{id}/host-codes`); it goes in the
+body of `POST /v1/hosts/enroll`, without a bearer token, and the answer names the team. The v1
+Vapor control plane takes its shared token as `Authorization: Bearer` instead. Maccheri.app has one
+field, "Code or token": a string starting with `hc_` is a code. `enroll` stores the agent token and
+the team in the login keychain (service `dev.maccheri.agent`), `run` reads it from there. `--control-plane URL --token TOKEN` skips the keychain.
 
 ## How it works
 
@@ -40,8 +44,8 @@ VMPool: warm guest of the right image, or a free slot, or evict a warm guest of 
   0.5 s → `ready` → `SimulatorPeer.run` with a loopback port that leads to the guest's `:7300` →
   when the viewer leaves, the session times out, the control plane lists it in `endedSessions` or
   answers `410 Gone`, the VM is destroyed and the agent reports `ended` (or `failed`).
-  The peer is `SignalingStubPeer` (joins signaling as the host, waits for `bye`, no media) until D's
-  `HostPeer` lands.
+  The peer is D's `HostPeer` (`WebRTCPeer`); `--stub-peer` swaps in `SignalingStubPeer`, which
+  joins signaling as the host and waits for `bye`, without media.
 - **Cleanup.** Clones live in `<work>/<lease id>`. The agent holds an exclusive `flock` on
   `<work>/.lock` and, on start, deletes every UUID-named directory there: whatever a crashed agent
   left behind. Quitting the app or Ctrl-C on the CLI stops the VMs and deletes their clones.

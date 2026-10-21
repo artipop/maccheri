@@ -67,7 +67,13 @@ class Handler(BaseHTTPRequestHandler):
             request = self.body()
             host = str(uuid.uuid4()).upper()
             state["hosts"][host] = request["name"]
-            return self.reply(200, {"hostID": host, "agentToken": "agent-" + host})
+            enrollment = {"hostID": host, "agentToken": "agent-" + host}
+            if request.get("code"):
+                # v2: any hc_ code joins the fake team; "hc_expired" doesn't.
+                if request["code"] == "hc_expired":
+                    return self.reply(401, {"error": "invalid or expired code"})
+                enrollment.update(teamID="0B9A3C2E-6F4D-4C1A-9E7B-1D2C3B4A5F60", teamName="Fake team")
+            return self.reply(200, enrollment)
         if path == "/agent/v1/heartbeat":
             heartbeat = self.body()
             with lock:
