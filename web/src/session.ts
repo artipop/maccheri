@@ -52,9 +52,11 @@ export class SimSession {
   private pendingCandidates: RTCIceCandidateInit[] = []
   hello: Hello | null = null
 
-  constructor(private signaling: SignalingInfo, readonly transport: VideoTransport, private events: SessionEvents) {
+  /** `relayOnly` forces TURN (testing the relay path). */
+  constructor(private signaling: SignalingInfo, readonly transport: VideoTransport, private events: SessionEvents, relayOnly = false) {
     this.pc = new RTCPeerConnection({
       iceServers: signaling.iceServers.map((s) => ({ urls: s.urls, username: s.username ?? undefined, credential: s.credential ?? undefined })),
+      iceTransportPolicy: relayOnly ? 'relay' : 'all',
     })
   }
 
