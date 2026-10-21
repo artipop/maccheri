@@ -29,13 +29,24 @@ let options = StreamServer.Options(
 
 do {
     let device = try SimDevice(udid: udid)
+    // --debug-button source[:target[:page]] (hex): press and release one button, then exit.
+    if let spec = arg("--debug-button") {
+        let parts = spec.split(separator: ":").map { UInt32($0, radix: 16)! }
+        let controls = try SimDeviceControls(device: device)
+        controls.rawButton(source: parts[0], target: parts.count > 1 ? parts[1] : 0x33, page: parts.count > 2 ? parts[2] : nil, down: true)
+        usleep(100_000)
+        controls.rawButton(source: parts[0], target: parts.count > 1 ? parts[1] : 0x33, page: parts.count > 2 ? parts[2] : nil, down: false)
+        usleep(500_000)
+        exit(0)
+    }
     print("device \(device.name) \(device.udid)")
+    let controls = try SimDeviceControls(device: device)
     let screen = SimScreen(device: device)
     try screen.start()
     let deadline = Date().addingTimeInterval(15)
     while screen.currentSurface == nil, Date() < deadline { usleep(20_000) }
     let touch = try SimTouchInjector(device: device)
-    let server = try StreamServer(device: device, screen: screen, touch: touch, options: options)
+    let server = try StreamServer(device: device, screen: screen, touch: touch, controls: controls, options: options)
     server.start()
     withExtendedLifetime(server) { dispatchMain() }
 } catch {

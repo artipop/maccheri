@@ -174,7 +174,7 @@ public final class SimStreamClient: @unchecked Sendable {
             send(.pong(v))
         case .pong(let v):
             rttMs = uptimeMs() - Double(v) / 1000
-        case .touch, .requestKeyframe:
+        default:
             break
         }
     }

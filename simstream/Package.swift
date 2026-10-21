@@ -11,6 +11,8 @@ let package = Package(
     products: [
         .library(name: "SimulatorBridge", targets: ["SimulatorBridge"]),
         .library(name: "SimStreamClient", targets: ["SimStreamClient"]),
+        /// `HostPeer`: WebRTC between the viewer and the guest's simstream (used by the agent).
+        .library(name: "SimStreamPeer", targets: ["SimStreamPeer"]),
     ],
     dependencies: [
         .package(path: "../protocol"),
@@ -24,6 +26,19 @@ let package = Package(
             swiftSettings: v5
         ),
         .executableTarget(name: "simstream-bench", dependencies: ["SimStreamClient"], swiftSettings: v5),
+        // libdatachannel + Mbed TLS, static; rebuilt by scripts/build-libdatachannel.sh.
+        .binaryTarget(name: "LibDataChannel", path: "Vendor/LibDataChannel.xcframework"),
+        .target(
+            name: "SimStreamPeer",
+            dependencies: [
+                "LibDataChannel",
+                .product(name: "SimStreamProtocol", package: "protocol"),
+                .product(name: "MaccheriProtocol", package: "protocol"),
+            ],
+            swiftSettings: v5
+        ),
+        .executableTarget(name: "simstream-peer", dependencies: ["SimStreamPeer"], swiftSettings: v5),
         .testTarget(name: "SimStreamClientTests", dependencies: ["SimStreamClient"]),
+        .testTarget(name: "SimStreamPeerTests", dependencies: ["SimStreamPeer"]),
     ]
 )
