@@ -53,6 +53,8 @@ public enum AgentError: Error, CustomStringConvertible {
     case imageNotFound(String)
     case cloneFailed(path: String, errno: Int32)
     case invalidVMConfiguration(String)
+    case workDirectoryBusy(String)
+    case noCapacity
 
     public var description: String {
         switch self {
@@ -60,6 +62,8 @@ public enum AgentError: Error, CustomStringConvertible {
         case let .imageNotFound(name): "image not found: \(name)"
         case let .cloneFailed(path, code): "clonefile(\(path)) failed: \(String(cString: strerror(code)))"
         case let .invalidVMConfiguration(reason): "invalid VM configuration: \(reason)"
+        case let .workDirectoryBusy(path): "another agent is using \(path)"
+        case .noCapacity: "no free VM slot"
         }
     }
 }

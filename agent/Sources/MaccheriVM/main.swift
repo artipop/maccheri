@@ -2,12 +2,14 @@ import AgentCore
 import Foundation
 
 // maccheri-vm --images DIR --work DIR --image NAME [--timeout SECONDS] [--keep] [--forward HOST:GUEST]...
+//             [--session FILE] [--cpus N] [--memory-gb N]
 // maccheri-vm --attach GUEST_IP --forward HOST:GUEST...
 //
 // Boots one throwaway clone of a base image exactly the way the agent does, without a control
-// plane, and prints how to SSH into it. For checking images and the VM setup by hand.
-// `--forward` relays a TCP port on all host interfaces to the guest (vmnet NAT hides it from the
-// LAN); `--attach` does only that, for a guest that is already running.
+// plane. The guest sits on the agent's isolated network (internet only), so the host reaches it
+// only through `--forward`, which listens on all host interfaces: `--forward 2222:22` for SSH,
+// `--forward 7300` for simstream. `--session` copies a `session.json` into the guest's share.
+// `--attach` relays ports to a guest that is already running elsewhere (e.g. `tart run`).
 func argument(_ name: String) -> String? {
     let args = CommandLine.arguments
     guard let index = args.firstIndex(of: name), index + 1 < args.count else { return nil }
@@ -21,6 +23,7 @@ func arguments(_ name: String) -> [String] {
 
 let usage = """
     usage: maccheri-vm --images DIR --work DIR --image NAME [--timeout SECONDS] [--keep] [--forward HOST:GUEST]...
+                       [--session FILE] [--cpus N] [--memory-gb N]
            maccheri-vm --attach GUEST_IP --forward HOST:GUEST...
 
     """
@@ -66,26 +69,9 @@ guard let imagesPath = argument("--images"), let workPath = argument("--work"), 
 }
 let timeout = Duration.seconds(argument("--timeout").flatMap(Int.init) ?? 3600)
 let keep = CommandLine.arguments.contains("--keep")
-
-enum DHCPLeases {
-    /// Finds the guest's address in the host's DHCP leases (vmnet's bootpd writes them there).
-    /// bootpd drops leading zeros in each octet: `1,a:2b:...`.
-    static func address(mac: String) -> String? {
-        guard let leases = try? String(contentsOfFile: "/var/db/dhcpd_leases", encoding: .utf8) else { return nil }
-        let wanted = mac.lowercased().split(separator: ":").map { String(Int($0, radix: 16) ?? -1, radix: 16) }.joined(separator: ":")
-        for entry in leases.components(separatedBy: "}") {
-            var ip: String?, hw: String?
-            for line in entry.split(separator: "\n") {
-                let parts = line.trimmingCharacters(in: .whitespaces).split(separator: "=", maxSplits: 1).map(String.init)
-                guard parts.count == 2 else { continue }
-                if parts[0] == "ip_address" { ip = parts[1] }
-                if parts[0] == "hw_address" { hw = parts[1].split(separator: ",").last.map(String.init) }
-            }
-            if hw == wanted, let ip { return ip }
-        }
-        return nil
-    }
-}
+var resources = VMResources()
+resources.cpuCount = argument("--cpus").flatMap(Int.init)
+resources.memorySize = argument("--memory-gb").flatMap(UInt64.init).map { $0 << 30 }
 
 let store = ImageStore(imagesDirectory: URL(filePath: imagesPath), workDirectory: URL(filePath: workPath))
 let base: VMBundle
@@ -98,7 +84,10 @@ do {
 let clone = try store.clone(base, jobID: UUID())
 let shared = clone.url.appending(path: "shared", directoryHint: .isDirectory)
 try FileManager.default.createDirectory(at: shared, withIntermediateDirectories: true)
-print("clone: \(clone.url.path) (\(base.config.cpuCount) CPU, \(base.config.memorySize >> 30) GB)")
+if let session = argument("--session") {
+    try FileManager.default.copyItem(at: URL(filePath: session), to: shared.appending(path: "session.json"))
+}
+print("clone: \(clone.url.path) (\(resources.cpuCount ?? base.config.cpuCount) CPU, \(resources.memory(for: base) >> 30) GB)")
 
 func cleanUp() {
     if keep { print("kept \(clone.url.path)") } else { store.destroy(clone) }
@@ -113,27 +102,24 @@ interrupt.setEventHandler {
 }
 interrupt.resume()
 
-let runner = VirtualizationRunner { mac in
-    print("started, mac \(mac); waiting for a DHCP lease…")
-    Task {
-        let start = ContinuousClock.now
-        while ContinuousClock.now - start < .seconds(300) {
-            if let ip = DHCPLeases.address(mac: mac) {
-                print("guest at \(ip) after \(ContinuousClock.now - start): ssh admin@\(ip)")
-                await startForwarding(to: ip)
-                return
-            }
-            try? await Task.sleep(for: .seconds(1))
-        }
-        print("no lease after 5 min")
-    }
-}
+let runner = VirtualizationRunner(log: { print($0) })
 
 Task { @MainActor in
     let started = ContinuousClock.now
     do {
-        let exit = try await runner.run(clone, sharedDirectory: shared, timeout: timeout)
-        print("vm \(exit) after \(ContinuousClock.now - started)")
+        let vm = try await runner.start(clone, sharedDirectory: shared, resources: resources)
+        let network = vm.guest as! GuestNetwork
+        print("started; guest network \(network.configuration.guest) via \(network.configuration.gateway), internet only")
+        for mapping in mappings {
+            let port = try network.forward(guestPort: mapping.guestPort, hostPort: mapping.hostPort, on: .any)
+            print("forwarding *:\(port) → guest:\(mapping.guestPort)")
+        }
+        Task {
+            await network.waitForLease()
+            print("guest took its DHCP lease after \(ContinuousClock.now - started)")
+        }
+        let exit = await Agent.waitForExit(vm, timeout: timeout)
+        print("vm \(exit.map { "\($0)" } ?? "timed out") after \(ContinuousClock.now - started)")
         cleanUp()
         Foundation.exit(0)
     } catch {
