@@ -7,7 +7,8 @@
 //   node bench/latency.mjs --browser firefox --webdriver http://localhost:4444  # geckodriver -p 4444
 //   node bench/latency.mjs --browser chromium --steps shot:a,home,shot:b,rotate:landscapeLeft,type:hi,lock
 //
-// chrome = /Applications/Google Chrome.app, chromium = Playwright's headless shell. Needs a
+// chrome = /Applications/Google Chrome.app, helium = /Applications/Helium.app, chromium =
+// Playwright's headless shell, --executable <path> any other Chromium. Needs a
 // control plane at --url (the dev mock: `npm run dev`) with a host peer serving it.
 
 import { writeFileSync } from 'node:fs'
@@ -22,15 +23,20 @@ const { values: o } = parseArgs({ options: {
   steps: { type: 'string', default: '' },
   hold: { type: 'string', default: '60' },
   headed: { type: 'boolean', default: false },
+  executable: { type: 'string' },
 } })
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function playwright() {
   const { chromium } = await import('playwright-core')
-  const launch = o.browser === 'chrome'
-    ? { channel: 'chrome', headless: !o.headed }
-    : { executablePath: process.env.CHROMIUM ?? `${process.env.HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1217/chrome-headless-shell-mac-arm64/chrome-headless-shell` }
+  // Other Chromium-based browsers by path (--executable), each in a throwaway profile.
+  const executables = { helium: '/Applications/Helium.app/Contents/MacOS/Helium' }
+  const launch = o.executable || executables[o.browser]
+    ? { executablePath: o.executable ?? executables[o.browser], headless: !o.headed }
+    : o.browser === 'chrome'
+      ? { channel: 'chrome', headless: !o.headed }
+      : { executablePath: process.env.CHROMIUM ?? `${process.env.HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1217/chrome-headless-shell-mac-arm64/chrome-headless-shell` }
   const browser = await chromium.launch(launch)
   const page = await browser.newPage({ viewport: { width: 900, height: 1000 } })
   page.on('pageerror', (e) => console.log('pageerror:', e.message))
@@ -69,7 +75,7 @@ async function webdriver() {
   }
 }
 
-const b = o.browser === 'chrome' || o.browser === 'chromium' ? await playwright() : await webdriver()
+const b = o.browser === 'safari' || o.browser === 'firefox' ? await webdriver() : await playwright()
 async function waitFor(js, timeout = 60000) {
   const end = Date.now() + timeout
   while (Date.now() < end) { if (await b.eval(js)) return; await sleep(200) }
