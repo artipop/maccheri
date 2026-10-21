@@ -16,7 +16,7 @@ import { parseArgs } from 'node:util'
 
 const { values: o } = parseArgs({ options: {
   browser: { type: 'string', default: 'chromium' },
-  video: { type: 'string', default: 'dataChannel' },
+  video: { type: 'string', default: 'track' },
   taps: { type: 'string', default: '40' },
   url: { type: 'string', default: 'http://localhost:5173/' },
   webdriver: { type: 'string', default: 'http://localhost:4444' },
@@ -39,7 +39,7 @@ async function playwright() {
       ? { channel: 'chrome', headless: !o.headed }
       : { executablePath: process.env.CHROMIUM ?? `${process.env.HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1217/chrome-headless-shell-mac-arm64/chrome-headless-shell` }
   const browser = await chromium.launch(launch)
-  const page = await browser.newPage({ viewport: { width: 900, height: 1000 } })
+  const page = await browser.newPage({ viewport: { width: 900, height: 1000 }, ignoreHTTPSErrors: true })
   page.on('pageerror', (e) => console.log('pageerror:', e.message))
   return {
     open: (url) => page.goto(url),
@@ -115,11 +115,21 @@ try {
       console.log(await b.eval(`document.querySelector('.status').textContent`))
     }
     else if (name === 'wait') await sleep(Number(arg))
+    else if (name === 'measure') {
+      // measure:N — N taps on the current video path, then its p50/p95 (samples restart on a switch).
+      for (let i = 0; i < Number(arg); i++) { await b.tap(center[0], center[1], Number(o.hold)); await sleep(250 + Math.random() * 150) }
+      await sleep(800)
+      const [mode, samples] = await b.eval(`[maccheri.session.transport, maccheri.session.samples]`)
+      const sorted = [...samples].sort((x, y) => x - y)
+      const p = (q) => sorted[Math.min(sorted.length - 1, Math.round((sorted.length - 1) * q))]?.toFixed(1)
+      console.log(`RESULT ${o.browser} ${mode}: n=${samples.length}/${arg} p50 ${p(0.5)} p95 ${p(0.95)} ms`)
+    }
     else if (name === 'drag') {
       // drag:x1 y1 x2 y2, normalised; sent as touches directly, the way a pointer drag would.
       const [x1, y1, x2, y2] = arg.split(' ').map(Number)
       await b.eval(`(async () => { const t = maccheri.session; t.touch('began', ${x1}, ${y1}); for (let i = 1; i <= 12; i++) { await new Promise((r) => setTimeout(r, 20)); t.touch('moved', ${x1} + (${x2} - ${x1}) * i / 12, ${y1} + (${y2} - ${y1}) * i / 12) } t.touch('ended', ${x2}, ${y2}) })()`)
     }
+    else if (name === 'switch') await b.eval(`document.querySelector('button[title^="Переключить"]').click()`)
     else if (name === 'button') await b.eval(`document.querySelector('button[title="${arg}"]').click()`)
   }
 
