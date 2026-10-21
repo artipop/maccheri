@@ -2,18 +2,13 @@ import Fluent
 import MaccheriProtocol
 import Vapor
 
-/// The agent's long-poll for work, its session state reports and CI completions. See ``WorkAPI``,
-/// and the legacy CI-only ``AgentAPI``.
+/// The agent's long-poll for work, its session state reports and CI completions. See ``WorkAPI``.
 struct WorkController: RouteCollection {
     func boot(routes: any RoutesBuilder) throws {
         let agent = routes.grouped(AgentAuthMiddleware())
         agent.post("agent", "v1", "work", use: work)
         agent.post("agent", "v1", "sessions", ":id", "state", use: reportState)
-
-        // Old agents authenticate with AGENT_TOKENS from the environment; keep until A moves to /work.
-        let legacy = routes.grouped(AgentAuthMiddleware(allowLegacyTokens: true))
-        legacy.post("agent", "v1", "lease", use: lease)
-        legacy.post("agent", "v1", "jobs", ":id", "complete", use: complete)
+        agent.post("agent", "v1", "jobs", ":id", "complete", use: complete)
     }
 
     @Sendable
@@ -71,25 +66,12 @@ struct WorkController: RouteCollection {
         }
     }
 
-    /// Legacy: CI only, answers at once.
-    @Sendable
-    func lease(req: Request) async throws -> Response {
-        let request = try req.content.decode(LeaseRequest.self)
-        guard request.freeSlots > 0 else { return Response(status: .noContent) }
-        let host = req.auth.get(HostModel.self)
-        let dispatcher = Dispatcher(db: req.db, maccheri: req.maccheri, logger: req.logger)
-        guard let lease = try await req.maccheri.assignment.withLock({ try await dispatcher.nextJob(labels: request.labels, hostID: host?.id) })
-        else { return Response(status: .noContent) }
-        return try await lease.encodeResponse(status: .ok, for: req)
-    }
-
     @Sendable
     func complete(req: Request) async throws -> HTTPStatus {
         guard let id = req.parameters.get("id", as: UUID.self) else { throw Abort(.badRequest) }
         let result = try req.content.decode(CompleteRequest.self)
-        let host = req.auth.get(HostModel.self)
-        guard let job = try await CIJobModel.find(id, on: req.db), job.state == .leased,
-              host == nil || job.hostID == host?.id
+        let host = try req.auth.require(HostModel.self)
+        guard let job = try await CIJobModel.find(id, on: req.db), job.state == .leased, job.hostID == host.id
         else { throw Abort(.notFound) }
         job.state = .done
         job.outcome = result.outcome

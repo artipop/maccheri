@@ -83,7 +83,7 @@ final class AuthHostTests: ControlPlaneTestCase {
     func testAgentCallsNeedHostToken() async throws {
         let owner = try await signUp("Owner")
         try await assertEqual(try await status(.POST, "agent/v1/heartbeat", Heartbeat(agentVersion: "x", capacity: Self.capacity()), token: owner.token), .unauthorized)
-        try await assertEqual(try await status(.POST, "agent/v1/work", LeaseRequest(labels: [], freeSlots: 1), token: legacyAgentToken), .unauthorized, "env tokens only work on the legacy lease")
+        try await assertEqual(try await status(.POST, "agent/v1/work", LeaseRequest(labels: [], freeSlots: 1), token: owner.token), .unauthorized)
     }
 
     func testOfflineHostGetsNoWork() async throws {

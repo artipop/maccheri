@@ -12,7 +12,7 @@ struct Dispatcher {
     func nextWork(for host: HostModel, request: LeaseRequest) async throws -> WorkLease? {
         guard request.freeSlots > 0 else { return nil }
         if let lease = try await nextSession(for: host) { return .simulator(lease) }
-        if let lease = try await nextJob(labels: request.labels, hostID: host.id) { return .ci(lease) }
+        if let lease = try await nextJob(labels: request.labels, hostID: host.id!) { return .ci(lease) }
         return nil
     }
 
@@ -50,7 +50,7 @@ struct Dispatcher {
     }
 
     /// Hands out the oldest CI job the labels cover, with a fresh JIT runner config.
-    func nextJob(labels: [String], hostID: UUID?) async throws -> JobLease? {
+    func nextJob(labels: [String], hostID: UUID) async throws -> JobLease? {
         guard let provisioner = maccheri.provisioner else { return nil }
         let hostLabels = Set(labels.map { $0.lowercased() })
         let pending = try await CIJobModel.query(on: db).filter(\.$state == .pending).sort(\.$enqueuedAt).all()
@@ -77,7 +77,7 @@ struct Dispatcher {
             logger.error("jit config failed", metadata: ["job": "\(job.githubJobID)", "error": "\(error)"])
             throw Abort(.badGateway, reason: "could not provision runner")
         }
-        logger.info("job leased", metadata: ["job": "\(job.githubJobID)", "host": "\(hostID?.uuidString ?? "legacy")"])
+        logger.info("job leased", metadata: ["job": "\(job.githubJobID)", "host": "\(hostID)"])
         return JobLease(
             jobID: job.id!,
             githubJobID: job.githubJobID,

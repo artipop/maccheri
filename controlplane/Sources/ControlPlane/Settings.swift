@@ -32,8 +32,6 @@ struct Settings: Sendable {
 
     /// `X-Hub-Signature-256` secret configured on the GitHub App; nil disables the webhook.
     var webhookSecret: String?
-    /// Bearer tokens accepted on the legacy `/agent/v1/lease`, before hosts had their own.
-    var legacyAgentTokens: Set<String> = []
     /// Jobs are taken only when `runs-on` contains this label.
     var runnerLabel: String = "maccheri"
     var defaultImage: String = "macos-27-xcode-27.2"
@@ -82,7 +80,6 @@ struct Settings: Sendable {
         settings.stunURLs = list("STUN_URLS")
 
         settings.webhookSecret = string("GITHUB_WEBHOOK_SECRET")
-        settings.legacyAgentTokens = Set(list("AGENT_TOKENS"))
         if let label = string("RUNNER_LABEL") { settings.runnerLabel = label }
         if let image = string("DEFAULT_IMAGE") { settings.defaultImage = image }
         if let value = try int("JOB_TIMEOUT_SECONDS") { settings.jobTimeoutSeconds = value }
