@@ -36,10 +36,13 @@ public struct CreateSessionRequest: Codable, Sendable, Equatable {
     public var device: DeviceSpec?
     /// Pin the session to one host (for testing); nil lets the control plane choose.
     public var hostID: UUID?
+    /// v2: whose Macs to use; required when the user is in more than one team.
+    public var teamID: UUID?
 
-    public init(device: DeviceSpec? = nil, hostID: UUID? = nil) {
+    public init(device: DeviceSpec? = nil, hostID: UUID? = nil, teamID: UUID? = nil) {
         self.device = device
         self.hostID = hostID
+        self.teamID = teamID
     }
 }
 
@@ -68,8 +71,10 @@ public struct SessionInfo: Codable, Sendable, Equatable {
     public var signaling: SignalingInfo?
     /// Human-readable reason for `failed` / `ended`.
     public var message: String?
+    /// v2: the team whose Mac serves the session.
+    public var teamID: UUID?
 
-    public init(id: UUID, state: SessionState, device: DeviceSpec?, hostID: UUID?, hostName: String?, createdAt: Date, expiresAt: Date, signaling: SignalingInfo?, message: String?) {
+    public init(id: UUID, state: SessionState, device: DeviceSpec?, hostID: UUID?, hostName: String?, createdAt: Date, expiresAt: Date, signaling: SignalingInfo?, message: String?, teamID: UUID? = nil) {
         self.id = id
         self.state = state
         self.device = device
@@ -79,5 +84,6 @@ public struct SessionInfo: Codable, Sendable, Equatable {
         self.expiresAt = expiresAt
         self.signaling = signaling
         self.message = message
+        self.teamID = teamID
     }
 }

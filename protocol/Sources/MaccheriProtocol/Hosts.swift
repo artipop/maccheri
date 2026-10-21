@@ -35,14 +35,19 @@ public struct HostHardware: Codable, Sendable, Equatable {
     }
 }
 
+/// v2: `POST /v1/hosts/enroll` needs no bearer token; ``code`` (from `POST /v1/teams/{id}/host-codes`)
+/// says which team the Mac joins. v1 (Vapor, mini-prod): no code, `Authorization: Bearer <shared token>`.
 public struct HostEnrollRequest: Codable, Sendable, Equatable {
     /// Owner-visible name, defaults to the Mac's computer name.
     public var name: String
     public var hardware: HostHardware
+    /// v2: one-time enrollment code.
+    public var code: String?
 
-    public init(name: String, hardware: HostHardware) {
+    public init(name: String, hardware: HostHardware, code: String? = nil) {
         self.name = name
         self.hardware = hardware
+        self.code = code
     }
 }
 
@@ -50,10 +55,15 @@ public struct HostEnrollment: Codable, Sendable, Equatable {
     public var hostID: UUID
     /// Bearer token for every `/agent/v1/...` call. Stored in the owner's keychain.
     public var agentToken: String
+    /// v2: the team the Mac now serves, for the app to show.
+    public var teamID: UUID?
+    public var teamName: String?
 
-    public init(hostID: UUID, agentToken: String) {
+    public init(hostID: UUID, agentToken: String, teamID: UUID? = nil, teamName: String? = nil) {
         self.hostID = hostID
         self.agentToken = agentToken
+        self.teamID = teamID
+        self.teamName = teamName
     }
 }
 
@@ -101,14 +111,17 @@ public struct HostInfo: Codable, Sendable, Equatable {
     public var online: Bool
     /// Last reported capacity; nil until the first heartbeat.
     public var capacity: HostCapacity?
+    /// v2: owning team.
+    public var teamID: UUID?
 
-    public init(id: UUID, name: String, ownerName: String, hardware: HostHardware, online: Bool, capacity: HostCapacity?) {
+    public init(id: UUID, name: String, ownerName: String, hardware: HostHardware, online: Bool, capacity: HostCapacity?, teamID: UUID? = nil) {
         self.id = id
         self.name = name
         self.ownerName = ownerName
         self.hardware = hardware
         self.online = online
         self.capacity = capacity
+        self.teamID = teamID
     }
 }
 

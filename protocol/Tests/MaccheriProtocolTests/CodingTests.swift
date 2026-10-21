@@ -70,3 +70,20 @@ private let signaling = SignalingInfo(
     let metadata = try JSONDecoder().decode(ImageMetadata.self, from: Data(json.utf8))
     #expect(metadata == ImageMetadata(labels: ["maccheri"], devices: [DeviceSpec(deviceType: "t", runtime: "r")], guestVersion: "1"))
 }
+
+@Test func teamsV2RoundTrip() throws {
+    let team = Team(id: UUID(), name: "maccheri", role: .owner)
+    #expect(try roundTrip(team) == team)
+    let me = UserInfo(id: UUID(), name: "Artem", isAdmin: false, login: "artem", avatarURL: URL(string: "https://avatars.githubusercontent.com/u/1"), teams: [team])
+    #expect(try roundTrip(me) == me)
+    let invite = Invite(code: "c", expiresAt: Date(timeIntervalSince1970: 1_800_000_000), teamID: team.id, role: .member, url: URL(string: "https://x/invite/c"))
+    #expect(try roundTrip(invite) == invite)
+    #expect(try roundTrip(HostEnrollRequest(name: "mini", hardware: HostHardware(model: "m", chip: "c", cpuCount: 1, memoryBytes: 1, macOSVersion: "27"), code: "hc_1")).code == "hc_1")
+    #expect(TeamRole.member < .admin && .admin < .owner)
+}
+
+@Test func v1ShapesUnchanged() throws {
+    // v2 fields are optional and omitted when nil, so v1 JSON stays byte-for-byte the same.
+    let json = String(decoding: try JSONEncoder().encode(UserInfo(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!, name: "A", isAdmin: true)), as: UTF8.self)
+    #expect(!json.contains("login") && !json.contains("teams"))
+}
