@@ -1,4 +1,5 @@
 // simstream-bench --host 127.0.0.1 [--port 7300] [--taps 60] [--hold 60]
+// simstream-bench --host … --tap X,Y | --drag X,Y1,Y2     one gesture, for checking input by hand
 //
 // Headless simstream client for latency runs. With TapProbe in the foreground (it flips the screen
 // black/white on every touch-down) it taps the screen centre N times and reports click → decoded
@@ -67,6 +68,26 @@ guard firstFrame.wait(timeout: .now() + 10) == .success else {
     exit(1)
 }
 usleep(500_000)
+
+/// One tap or a vertical drag at normalised coordinates, then exit.
+func gesture(_ spec: String, drag: Bool) -> Never {
+    let v = spec.split(separator: ",").compactMap { Double($0) }
+    guard v.count == (drag ? 3 : 2) else { print("bad gesture \(spec)"); exit(64) }
+    client.touch(.began, x: v[0], y: v[1])
+    if drag {
+        for step in 1...30 {
+            usleep(16_000)
+            client.touch(.moved, x: v[0], y: v[1] + (v[2] - v[1]) * Double(step) / 30)
+        }
+    } else {
+        usleep(80_000)
+    }
+    client.touch(.ended, x: v[0], y: drag ? v[2] : v[1])
+    usleep(500_000)
+    exit(0)
+}
+if let spec = arg("--tap") { gesture(spec, drag: false) }
+if let spec = arg("--drag") { gesture(spec, drag: true) }
 
 var missed = 0
 for i in 0..<taps {

@@ -1,4 +1,4 @@
-// simstream --udid <UDID> [--port 7300] [--scale 0.5] [--fps-cap 60] [--bitrate 4000]
+// simstream --udid <UDID> [--port 7300] [--scale 0.5] [--fps-cap 60] [--bitrate 4000] [--refine 3]
 //
 // Streams a booted iOS Simulator over TCP (SimStreamProtocol) and turns the client's touches into
 // simulator HID events. Runs next to the simulator, e.g. inside the macOS guest. One client at a
@@ -16,14 +16,15 @@ func arg(_ name: String) -> String? {
 }
 
 guard let udid = arg("--udid") else {
-    FileHandle.standardError.write(Data("usage: simstream --udid <UDID> [--port 7300] [--scale 0.5] [--fps-cap 60] [--bitrate 4000 (kbit/s)]\n".utf8))
+    FileHandle.standardError.write(Data("usage: simstream --udid <UDID> [--port 7300] [--scale 0.5] [--fps-cap 60] [--bitrate 4000 (kbit/s)] [--refine 3 (idle passes)]\n".utf8))
     exit(64)
 }
 let options = StreamServer.Options(
     port: arg("--port").flatMap(UInt16.init) ?? SimStream.defaultPort,
     scale: arg("--scale").flatMap(Double.init) ?? 0.5,
     fpsCap: arg("--fps-cap").flatMap(Int.init) ?? 60,
-    bitrate: (arg("--bitrate").flatMap(Int.init) ?? 4000) * 1000
+    bitrate: (arg("--bitrate").flatMap(Int.init) ?? 4000) * 1000,
+    refinePasses: arg("--refine").flatMap(Int.init) ?? 3
 )
 
 do {

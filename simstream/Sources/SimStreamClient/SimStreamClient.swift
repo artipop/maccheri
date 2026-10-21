@@ -41,11 +41,12 @@ public final class SimStreamClient: @unchecked Sendable {
     }
 
     public let queue = DispatchQueue(label: "simstream-client", qos: .userInteractive)
-    public var onState: ((State) -> Void)?
-    public var onHello: ((Hello) -> Void)?
-    public var onFrame: ((Frame) -> Void)?
+    // Set before `connect()`.
+    public var onState: (@Sendable (State) -> Void)?
+    public var onHello: (@Sendable (Hello) -> Void)?
+    public var onFrame: (@Sendable (Frame) -> Void)?
     /// Twice a second.
-    public var onStats: ((Stats) -> Void)?
+    public var onStats: (@Sendable (Stats) -> Void)?
 
     public private(set) var hello: Hello?
     public private(set) var tracker = LatencyTracker()
@@ -91,15 +92,15 @@ public final class SimStreamClient: @unchecked Sendable {
         connection.cancel()
     }
 
-    /// Sends a touch at a point normalised to the screen; returns its id. Thread-safe.
-    @discardableResult
-    public func touch(_ phase: Touch.Phase, x: Double, y: Double) -> UInt32 {
-        queue.sync {
+    /// Sends a touch at a point normalised to the screen (0…1 from the top-left). Doesn't block;
+    /// the latency clock starts now.
+    public func touch(_ phase: Touch.Phase, x: Double, y: Double) {
+        let time = uptimeMs()
+        queue.async { [self] in
             let t = Touch(id: nextTouchID, phase: phase, x: Float(min(max(x, 0), 1)), y: Float(min(max(y, 0), 1)))
             nextTouchID += 1
-            tracker.sent(t, atMs: uptimeMs())
+            tracker.sent(t, atMs: time)
             send(.touch(t))
-            return t.id
         }
     }
 

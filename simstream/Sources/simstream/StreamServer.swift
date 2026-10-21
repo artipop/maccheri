@@ -8,12 +8,14 @@ import SimulatorBridge
 func uptimeMicros() -> UInt64 { DispatchTime.now().uptimeNanoseconds / 1000 }
 
 /// Serves one client at a time: video out, touches in. A new connection replaces the old one.
-final class StreamServer {
+final class StreamServer: @unchecked Sendable {
     struct Options {
         var port: UInt16
         var scale: Double
         var fpsCap: Int
         var bitrate: Int
+        /// Idle refinement passes after the screen settles; 0 turns refinement off.
+        var refinePasses: Int
     }
 
     private let options: Options
@@ -48,6 +50,13 @@ final class StreamServer {
     /// `SIMSTREAM_TRACE=1`: one line per frame that carries a new touch, with where the time went.
     private let trace = ProcessInfo.processInfo.environment["SIMSTREAM_TRACE"] == "1"
     private var tracedAck: UInt32 = 0
+
+    /// Bumped for every new picture; idle refinement stops when it changes.
+    private var generation = 0
+    /// The ack that belongs to the encoder's last picture; repeats of it must not claim newer touches.
+    private var lastFrameAck: (id: UInt32, receivedMicros: UInt64) = (0, 0)
+    /// Server queue: when the last touch arrived; refinement waits for input to settle.
+    private var lastTouchMicros: UInt64 = 0
 
     // Stats (server queue).
     private var stats = (frames: 0, bytes: 0, dropped: 0, keyframes: 0, encodeMicros: [UInt32]())
@@ -166,7 +175,8 @@ final class StreamServer {
     private func handle(_ message: SimStreamMessage) {
         switch message {
         case .touch(let t):
-            received[t.id] = uptimeMicros()
+            lastTouchMicros = uptimeMicros()
+            received[t.id] = lastTouchMicros
             inject(t)
         case .requestKeyframe:
             needKeyframe = true
@@ -256,12 +266,41 @@ final class StreamServer {
             let ms = { (a: UInt64, b: UInt64) in String(format: "%.1f", Double(Int64(b) - Int64(a)) / 1000) }
             print("trace touch \(ack.id): received → frame callback \(ms(ack.receivedMicros, latestCallbackMicros)), callback → copy \(ms(latestCallbackMicros, start)), scale \(ms(start, uptimeMicros())) ms")
         }
+        lastFrameAck = ack
         submit(buffer, ack: ack, start: start)
+        scheduleRefinement()
     }
 
     private func resendLastFrame() {
-        guard let buffer = encoder.lastFrame ?? latestSurface.flatMap(encoder.scale) else { return }
-        submit(buffer, ack: queue.sync { acked }, start: uptimeMicros())
+        if encoder.lastFrame == nil, let surface = latestSurface { return encode(surface) }
+        guard let buffer = encoder.lastFrame else { return }
+        submit(buffer, ack: lastFrameAck, start: uptimeMicros())
+        scheduleRefinement()
+    }
+
+    /// Low-latency rate control spends little on any one frame, and the simulator sends nothing
+    /// while the screen is still, so the last picture of a change (or a keyframe on connect)
+    /// would stay soft. Once the screen has been still for a moment, the same frame is encoded a
+    /// few more times; each pass sharpens it at a small cost in bytes.
+    /// Refinement also holds off while touches keep coming, so a pass never occupies the encoder
+    /// just as the frame answering a click is ready.
+    private func scheduleRefinement() {
+        generation += 1
+        let passes = options.refinePasses
+        let current = generation
+        let settle: UInt64 = 150_000
+        func refine(_ remaining: Int, after delay: Int) {
+            screen.queue.asyncAfter(deadline: .now() + .microseconds(delay)) { [weak self] in
+                guard let self, self.generation == current, remaining > 0, let buffer = self.encoder.lastFrame else { return }
+                let now = uptimeMicros()
+                let quiet = now - max(self.lastEncodeMicros, self.queue.sync { self.lastTouchMicros })
+                if quiet < settle { return refine(remaining, after: Int(settle - quiet)) }
+                self.lastEncodeMicros = now
+                self.submit(buffer, ack: self.lastFrameAck, start: now)
+                refine(remaining - 1, after: 60_000)
+            }
+        }
+        refine(passes, after: Int(settle))
     }
 
     private func submit(_ buffer: CVPixelBuffer, ack: (id: UInt32, receivedMicros: UInt64), start: UInt64) {
