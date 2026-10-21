@@ -4,7 +4,7 @@ import MaccheriProtocol
 
 // maccheri-agent enroll --control-plane URL --user-token TOKEN [--name NAME]
 // maccheri-agent run --images DIR --work DIR [--warm N] [--max-vms N] [--cpus N] [--memory-gb N]
-//                    [--control-plane URL --token TOKEN]
+//                    [--control-plane URL --token TOKEN] [--stub-peer]
 //
 // The headless agent. `enroll` registers this Mac with the owner's user token and keeps the agent
 // token in the login keychain; `run` uses it (or `--token` / MACCHERI_AGENT_TOKEN) until stopped.
@@ -17,7 +17,7 @@ func argument(_ name: String) -> String? {
 let usage = """
     usage: maccheri-agent enroll --control-plane URL --user-token TOKEN [--name NAME]
            maccheri-agent run --images DIR --work DIR [--warm N] [--max-vms N] [--cpus N] [--memory-gb N]
-                              [--control-plane URL --token TOKEN]
+                              [--control-plane URL --token TOKEN] [--stub-peer]
 
     """
 
@@ -75,8 +75,10 @@ case "run":
     if let gb = argument("--memory-gb").flatMap(UInt64.init) { settings.resources.memorySize = gb << 30 }
 
     let log: @Sendable (String) -> Void = { print($0) }
+    // `--stub-peer`: no WebRTC, just the session lifecycle (for testing without a browser).
+    let peer: any SimulatorPeer = CommandLine.arguments.contains("--stub-peer") ? SignalingStubPeer(log: log) : WebRTCPeer(log: log)
     let pool = VMPool(store: store, runner: VirtualizationRunner(log: log), settings: settings, log: log)
-    let agent = Agent(controlPlane: ControlPlaneClient(baseURL: controlPlane, token: token), pool: pool, peer: SignalingStubPeer(log: log), log: log)
+    let agent = Agent(controlPlane: ControlPlaneClient(baseURL: controlPlane, token: token), pool: pool, peer: peer, log: log)
     print("maccheri-agent \(Agent.version): \(controlPlane), images \(imagesPath), work \(workPath)")
 
     let running = Task { await agent.run() }

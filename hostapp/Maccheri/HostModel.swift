@@ -93,7 +93,7 @@ final class HostModel {
         let agent = Agent(
             controlPlane: ControlPlaneClient(baseURL: credentials.controlPlane, token: credentials.agentToken),
             pool: pool,
-            peer: SignalingStubPeer(log: log),
+            peer: WebRTCPeer(log: log),
             log: log,
             onStatus: { [weak self] status in Task { @MainActor in self?.status = status } }
         )

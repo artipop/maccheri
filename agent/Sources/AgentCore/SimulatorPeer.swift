@@ -1,13 +1,31 @@
 import Foundation
 import MaccheriProtocol
 import Network
+import SimStreamPeer
 
 /// The host's end of a simulator session: talks to the viewer over signaling and WebRTC and to
-/// simstream in the guest through `connectToGuest`. D's `HostPeer` (simstream package) is the
-/// real one; ``SignalingStubPeer`` stands in until it lands.
+/// simstream in the guest through `connectToGuest`. ``WebRTCPeer`` is the real one;
+/// ``SignalingStubPeer`` only drives the lifecycle, for testing without a browser.
 public protocol SimulatorPeer: Sendable {
     /// Returns when the viewer leaves (bye, disconnect, timeout). Must honour task cancellation.
     func run(signaling: SignalingInfo, sessionID: UUID, connectToGuest: @escaping @Sendable () async throws -> NWConnection) async throws
+}
+
+/// D's `HostPeer` (simstream package): WebRTC to the viewer, video and touches to and from simstream.
+public struct WebRTCPeer: SimulatorPeer {
+    private let log: @Sendable (String) -> Void
+
+    public init(log: @escaping @Sendable (String) -> Void = { _ in }) {
+        self.log = log
+    }
+
+    public func run(signaling: SignalingInfo, sessionID: UUID, connectToGuest: @escaping @Sendable () async throws -> NWConnection) async throws {
+        let peer = HostPeer(signaling: signaling, sessionID: sessionID, connectToGuest: connectToGuest)
+        peer.onLog = { [log] in log("session \(sessionID): \($0)") }
+        // Cancelling this task stops the peer, which says bye to the viewer.
+        let reason = try await peer.run()
+        log("session \(sessionID): host peer finished: \(reason)")
+    }
 }
 
 /// Joins signaling as the host and waits for the viewer's `bye`, without any media. Enough to
