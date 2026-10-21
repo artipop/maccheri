@@ -72,10 +72,10 @@ public final class GuestNetwork: @unchecked Sendable {
 
     public func start() {
         queue.async { [self] in
-            link = SocketWatcher(fd: fd, queue: queue, onReadable: { [unowned self] in readFrames() }, onWritable: { [unowned self] in drainOutbox() })
+            link = SocketWatcher(fd: fd, queue: queue, onReadable: { [unowned self] in readFrames() }, onWritable: {})
             link?.setReading(true)
             let sweeper = DispatchSource.makeTimerSource(queue: queue)
-            sweeper.schedule(deadline: .now() + 10, repeating: 10)
+            sweeper.schedule(deadline: .now() + 5, repeating: 5)
             sweeper.setEventHandler { [unowned self] in sweep() }
             sweeper.resume()
             self.sweeper = sweeper
@@ -187,6 +187,7 @@ public final class GuestNetwork: @unchecked Sendable {
         for _ in 0..<256 {
             let count = buffer.withUnsafeMutableBytes { recv(fd, $0.baseAddress, $0.count, 0) }
             guard count > 0 else { break }
+            stats.framesIn += 1
             handleFrame(Array(buffer[..<count]))
         }
         flushAcks()
@@ -367,38 +368,84 @@ public final class GuestNetwork: @unchecked Sendable {
         sendIP(FrameBuilder.udp(from: source, port: sourcePort, to: configuration.guest, port: toPort, payload: payload))
     }
 
+    /// Sends one IPv4 packet to the guest, fragmenting it if it exceeds the MTU (large UDP
+    /// replies: DNS with EDNS, QUIC). A frame over the MTU would break the VM's NIC attachment.
     func sendIP(_ packet: [UInt8]) {
-        var packet = packet
         ipID &+= 1
-        packet.put16(ipID, at: 4)
+        let headerLength = Int(packet[0] & 0x0F) * 4
+        let mtu = configuration.mtu
+        guard packet.count > mtu else { return sendFragment(packet, id: ipID, offset: 0, more: false, keepDF: true) }
+        let header = Array(packet[0..<headerLength])
+        let payload = packet[headerLength...]
+        let chunk = (mtu - headerLength) / 8 * 8
+        var offset = 0
+        while offset < payload.count {
+            let end = min(offset + chunk, payload.count)
+            sendFragment(header + payload[(payload.startIndex + offset)..<(payload.startIndex + end)], id: ipID, offset: offset, more: end < payload.count, keepDF: false)
+            offset = end
+        }
+    }
+
+    private func sendFragment(_ packet: [UInt8], id: UInt16, offset: Int, more: Bool, keepDF: Bool) {
+        var packet = packet
+        packet.put16(UInt16(packet.count), at: 2)
+        packet.put16(id, at: 4)
+        var flags: UInt16 = keepDF ? packet.u16(6) & 0x4000 : 0
+        if more { flags |= 0x2000 }
+        packet.put16(flags | UInt16(offset / 8), at: 6)
         packet.put16(0, at: 10)
-        packet.put16(finishChecksum(checksumSum(packet[0..<20])), at: 10)
+        packet.put16(finishChecksum(checksumSum(packet[0..<(Int(packet[0] & 0x0F) * 4)])), at: 10)
         sendFrame(FrameBuilder.ethernet(to: guestMAC, from: gatewayMAC, type: EtherType.ipv4, payload: packet))
     }
 
     private func sendFrame(_ frame: [UInt8]) {
         guard !stopped else { return }
+        guard frame.count <= configuration.mtu + 14 else {
+            return log("guest network: dropped a \(frame.count)-byte frame over the MTU")
+        }
         if outbox.isEmpty, transmit(frame) { return }
         // Bounded: past this the guest isn't reading and TCP will retransmit anyway.
-        guard outbox.count < 4096 else { return }
+        guard outbox.count < 4096 else {
+            stats.dropped += 1
+            return
+        }
         outbox.append(frame)
-        link?.setWriting(true)
+        scheduleDrain()
     }
 
     /// `false` when the socket buffer is full.
     private func transmit(_ frame: [UInt8]) -> Bool {
         let sent = frame.withUnsafeBytes { send(fd, $0.baseAddress, $0.count, 0) }
-        if sent >= 0 { return true }
+        if sent >= 0 {
+            stats.framesOut += 1
+            return true
+        }
+        stats.lastSendError = errno
+        if errno == EAGAIN || errno == ENOBUFS { stats.full += 1 } else { stats.dropped += 1 }
         // The guest isn't attached or is gone; drop.
         return !(errno == EAGAIN || errno == ENOBUFS)
     }
 
+    private var drainScheduled = false
+
+    /// A datagram socketpair always looks writable (the space that matters is the peer's receive
+    /// buffer), so a write source would spin; retry on a short timer instead.
+    private func scheduleDrain() {
+        guard !drainScheduled else { return }
+        drainScheduled = true
+        queue.asyncAfter(deadline: .now() + .microseconds(500)) { [weak self] in
+            guard let self else { return }
+            drainScheduled = false
+            drainOutbox()
+        }
+    }
+
     private func drainOutbox() {
+        guard !stopped else { return }
         var sent = 0
         while sent < outbox.count, transmit(outbox[sent]) { sent += 1 }
         outbox.removeFirst(sent)
-        guard outbox.isEmpty else { return }
-        link?.setWriting(false)
+        guard outbox.isEmpty else { return scheduleDrain() }
         for flow in tcp.values { flow.pump() }
     }
 
@@ -421,7 +468,24 @@ public final class GuestNetwork: @unchecked Sendable {
         flow.socket.close()
     }
 
+    /// Counters for `MACCHERI_NET_DEBUG=1`, logged every 10 s.
+    struct Stats: Equatable {
+        var framesIn = 0
+        var framesOut = 0
+        /// Sends that found the socket buffer full (retried).
+        var full = 0
+        var dropped = 0
+        var lastSendError: Int32 = 0
+    }
+    private var stats = Stats()
+    private var loggedStats = Stats()
+    let debug = ProcessInfo.processInfo.environment["MACCHERI_NET_DEBUG"] != nil
+
     private func sweep() {
+        if debug, stats != loggedStats {
+            loggedStats = stats
+            log("guest network: in \(stats.framesIn) out \(stats.framesOut) full \(stats.full) dropped \(stats.dropped) errno \(stats.lastSendError) outbox \(outbox.count) tcp \(tcp.count) udp \(udp.count)")
+        }
         let now = ContinuousClock.now
         for flow in udp.values where now - flow.lastActive > flow.idleTimeout {
             remove(flow)
@@ -520,16 +584,24 @@ final class ICMPRelay {
     private func receive() {
         var buffer = [UInt8](repeating: 0, count: 65536)
         while true {
-            let count = buffer.withUnsafeMutableBytes { recv(socket.fd, $0.baseAddress, $0.count, 0) }
-            guard count > 0 else { return }
-            var packet = Array(buffer[..<count])
-            // macOS hands ICMP datagram sockets the IP header too.
-            var source: IPv4?
-            if packet[0] >> 4 == 4, let ip = IPv4Packet(packet) {
-                source = ip.source
-                packet = Array(ip.payload)
+            var from = sockaddr_in()
+            var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+            let count = buffer.withUnsafeMutableBytes { bytes in
+                withUnsafeMutablePointer(to: &from) {
+                    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { recvfrom(socket.fd, bytes.baseAddress, bytes.count, 0, $0, &length) }
+                }
             }
-            guard let source, packet.count >= 8, packet[0] == 0, pending[source] != nil else { continue }
+            guard count > 0 else { return }
+            let source = IPv4(UInt32(bigEndian: from.sin_addr.s_addr))
+            var packet = Array(buffer[..<count])
+            // macOS hands ICMP datagram sockets the IP header too, with `ip_len` in host byte
+            // order, so strip it by its header length alone.
+            if packet[0] >> 4 == 4 {
+                let headerLength = Int(packet[0] & 0x0F) * 4
+                guard packet.count > headerLength else { continue }
+                packet = Array(packet[headerLength...])
+            }
+            guard packet.count >= 8, packet[0] == 0, pending[source] != nil else { continue }
             network.sendIP(FrameBuilder.icmp(from: source, to: network.configuration.guest, message: packet))
         }
     }

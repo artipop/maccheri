@@ -214,7 +214,7 @@ func echo(_ connection: NWConnection) {
         var unacked = 0
         while true {
             guard let (_, segment) = guest.receiveTCP(timeout: 5) else { break }
-            #expect(Int(segment.seq &- next) <= Int(window), "sent beyond the window")
+            #expect(Int32(bitPattern: segment.seq &- next) <= Int32(window), "sent beyond the window")
             if segment.seq == next {
                 received += segment.payload
                 next &+= UInt32(segment.payload.count)
@@ -225,7 +225,8 @@ func echo(_ connection: NWConnection) {
                 guest.tcp(to: localhost, port: port, from: 50100, seq: 1, ack: next, flags: [.ack], window: window)
                 break
             }
-            if unacked >= Int(window) / 2 {
+            // Like a real stack: an ACK every second segment.
+            if unacked >= 2 * 1460 {
                 guest.tcp(to: localhost, port: port, from: 50100, seq: 1, ack: next, flags: [.ack], window: window)
                 unacked = 0
             }
@@ -336,4 +337,28 @@ func echo(_ connection: NWConnection) {
         guest.send(ip: FrameBuilder.tcp(from: IPv4(10, 233, 0, 9), port: 1, to: IPv4(127, 0, 0, 1), port: 2, seq: 0, ack: 0, flags: [.syn], window: 100))
         #expect(guest.receive(timeout: 0.3) == nil)
     }
+
+    /// A 3000-byte UDP reply (DNS with EDNS, QUIC) must reach the guest as MTU-sized fragments.
+    @Test func fragmentsPacketsOverTheMTU() throws {
+        let guest = try FakeGuest()
+        let payload = (0..<3000).map { UInt8(truncatingIfNeeded: $0) }
+        guest.network.queue.sync {
+            guest.network.sendUDP(from: IPv4(1, 1, 1, 1), port: 53, toPort: 5000, payload: payload)
+        }
+        var pieces: [(offset: Int, more: Bool, data: [UInt8])] = []
+        while let frame = guest.receive(timeout: 0.5) {
+            #expect(frame.count <= 1514)
+            let ip = Array(frame[14...])
+            let flags = ip.u16(6)
+            pieces.append(((Int(flags & 0x1FFF)) * 8, flags & 0x2000 != 0, Array(ip[20..<Int(ip.u16(2))])))
+            #expect(finishChecksum(checksumSum(ip[0..<20])) == 0)
+        }
+        #expect(pieces.count == 3)
+        #expect(pieces.map(\.more) == [true, true, false])
+        var assembled = [UInt8](repeating: 0, count: pieces.map { $0.offset + $0.data.count }.max() ?? 0)
+        for piece in pieces { assembled.replaceSubrange(piece.offset..<(piece.offset + piece.data.count), with: piece.data) }
+        let udp = try #require(UDPDatagram(assembled[...]))
+        #expect(Array(udp.payload) == payload)
+    }
 }
+

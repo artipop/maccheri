@@ -204,6 +204,10 @@ private final class MachineSession: NSObject, VZVirtualMachineDelegate {
         MainActor.assumeIsolated { finish(.guestStopped) }
     }
 
+    nonisolated func virtualMachine(_ virtualMachine: VZVirtualMachine, networkDevice: VZNetworkDevice, attachmentWasDisconnectedWithError error: any Error) {
+        MainActor.assumeIsolated { network.log("guest network: NIC detached: \(error.localizedDescription)") }
+    }
+
     nonisolated func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: any Error) {
         MainActor.assumeIsolated { finish(.failed(error.localizedDescription)) }
     }

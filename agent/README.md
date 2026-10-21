@@ -96,4 +96,23 @@ curl -m 5 http://192.168.1.1                # refused
 nc -z -G 3 <host's LAN IP> 22               # refused
 ```
 
-Results on the dev Mac: see the next section.
+Results on the dev Mac (M4, 2026-10-21, image `macos-27-xcode-27.2-v1`, host on Wi-Fi `10.10.20.0/24`
+plus a VPN on `utun4`):
+
+| From the guest | Result |
+|---|---|
+| DHCP lease | 19–22 s after start (the guest's boot, not the server) |
+| `curl https://github.com` | 200 |
+| download 10 MB | 2.0 MB/s (the host itself: 1.4–2 MB/s) |
+| upload 5 MB | 142 KB/s (the host itself: 108 KB/s, the uplink is the limit) |
+| `ping 1.1.1.1` | replies |
+| router `10.10.20.1`: ping, `:80` | no reply, refused |
+| host's LAN `10.10.20.86:22`, VPN `172.16.9.1:22` | refused |
+| gateway `10.233.0.1:22`, `100.100.100.100:53`, `169.254.1.1` | refused / no reply |
+
+`MACCHERI_NET_DEBUG=1` logs frame counters every 5 s and per-connection TCP counters on close.
+
+Two things the first real runs taught, both covered by tests now: replies larger than the MTU (DNS
+with EDNS, QUIC) must be IP-fragmented, a frame over the MTU breaks the NIC; and the stack needs a
+congestion window, because the virtual NIC drops silently when the guest's receive ring is full,
+and resending a multi-megabyte guest window after every loss drowned all of the guest's traffic.

@@ -53,6 +53,8 @@ final class TCPFlow: @unchecked Sendable {
     private let iss = UInt32.random(in: 0...UInt32.max)
     private var sndUna: UInt32
     private var sndNxt: UInt32
+    /// Highest sequence sent; go-back-N rewinds `sndNxt` but ACKs up to here are still valid.
+    private var sndMax: UInt32
     private var rcvNxt: UInt32 = 0
     private var guestWindow: UInt32 = 65535
     private var guestScale: UInt8 = 0
@@ -70,6 +72,11 @@ final class TCPFlow: @unchecked Sendable {
     private var hostWriteShut = false
 
     private var dupAcks = 0
+    private var counters = (segments: 0, bytes: 0, fastRetransmits: 0, timeouts: 0, maxWindow: 0)
+    /// Reno congestion window. The virtual NIC drops frames silently when the guest's receive
+    /// ring is full, so without it a large guest window turns every loss into a flood.
+    private var cwnd = 0
+    private var ssthresh = Int.max / 2
     private var rto = TCPFlow.minRTO
     private var retries = 0
     private var timer: (any DispatchSourceTimer)?
@@ -87,6 +94,7 @@ final class TCPFlow: @unchecked Sendable {
         state = .connecting
         sndUna = iss
         sndNxt = iss
+        sndMax = iss
         rcvNxt = segment.seq &+ 1
         guestWindow = UInt32(segment.window)
         if let scale = segment.windowScale {
@@ -110,6 +118,7 @@ final class TCPFlow: @unchecked Sendable {
         state = .synSent
         sndUna = iss
         sndNxt = iss &+ 1
+        sndMax = sndNxt
         mss = network.maxSegmentSize
         if let fd {
             SocketOptions.setNonBlocking(fd)
@@ -152,6 +161,7 @@ final class TCPFlow: @unchecked Sendable {
                 return done(true)
             }
             state = .established
+            cwnd = 10 * mss
             emit(seq: sndNxt, flags: [.ack])
             socket?.setReading(true)
             return
@@ -164,6 +174,7 @@ final class TCPFlow: @unchecked Sendable {
             stopTimer()
             retries = 0
             state = .established
+            cwnd = 10 * mss
             socket?.setReading(true)
             guestWindow = UInt32(segment.window) << (scaling ? UInt32(guestScale) : 0)
             receive(segment)
@@ -191,18 +202,26 @@ final class TCPFlow: @unchecked Sendable {
         let window = UInt32(segment.window) << (scaling ? UInt32(guestScale) : 0)
         // Any ACK means the guest is alive; only stalls without one count towards giving up.
         retries = 0
-        if seqGreater(ack, sndNxt) {
+        if seqGreater(ack, sndMax) {
             needsAck = true
             return
         }
         if seqGreater(ack, sndUna) {
             var acked = Int(ack &- sndUna)
-            if finSent, ack == sndNxt {
+            // The FIN sits right after the data: an ACK past the buffer covers it.
+            if hostEOF, acked > sendBuffer.count {
                 finAcked = true
-                acked -= 1
+                finSent = true
+                acked = sendBuffer.count
             }
             sendBuffer.removeFirst(min(acked, sendBuffer.count))
+            if cwnd < ssthresh {
+                cwnd += min(acked, mss)
+            } else {
+                cwnd += max(1, mss * mss / max(cwnd, 1))
+            }
             sndUna = ack
+            if seqGreater(sndUna, sndNxt) { sndNxt = sndUna }
             dupAcks = 0
             rto = Self.minRTO
             guestWindow = window
@@ -213,7 +232,11 @@ final class TCPFlow: @unchecked Sendable {
             guestWindow = window
             if duplicate {
                 dupAcks += 1
-                if dupAcks == 3 { goBack() }
+                if dupAcks == 3 {
+                    counters.fastRetransmits += 1
+                    reduceWindow(timeout: false)
+                    goBack()
+                }
             }
         }
     }
@@ -265,6 +288,7 @@ final class TCPFlow: @unchecked Sendable {
             }
             state = .synReceived
             sndNxt = iss &+ 1
+            sndMax = sndNxt
             return sendSYN()
         }
         flushToHost()
@@ -323,7 +347,7 @@ final class TCPFlow: @unchecked Sendable {
             let inFlight = Int(sndNxt &- sndUna)
             let unsent = sendBuffer.count - inFlight
             if unsent > 0 {
-                var room = Int(guestWindow) - inFlight
+                var room = min(Int(guestWindow), cwnd) - inFlight
                 if room <= 0 {
                     // Zero window: the retransmit timer keeps probing with one byte.
                     guard force, inFlight == 0 else {
@@ -333,13 +357,18 @@ final class TCPFlow: @unchecked Sendable {
                     room = 1
                 }
                 let length = min(unsent, mss, room)
+                counters.segments += 1
+                counters.bytes += length
+                counters.maxWindow = max(counters.maxWindow, Int(guestWindow))
                 emit(seq: sndNxt, flags: [.ack, .psh], payload: sendBuffer.slice(from: inFlight, length: length))
                 sndNxt &+= UInt32(length)
+                if seqGreater(sndNxt, sndMax) { sndMax = sndNxt }
                 armTimer()
                 force = false
             } else if hostEOF {
                 emit(seq: sndNxt, flags: [.ack, .fin])
                 sndNxt &+= 1
+                if seqGreater(sndNxt, sndMax) { sndMax = sndNxt }
                 finSent = true
                 armTimer()
             } else {
@@ -349,6 +378,12 @@ final class TCPFlow: @unchecked Sendable {
     }
 
     /// Retransmits everything from the oldest unacknowledged byte.
+    private func reduceWindow(timeout: Bool) {
+        let inFlight = Int(sndMax &- sndUna)
+        ssthresh = max(inFlight / 2, 2 * mss)
+        cwnd = timeout ? 2 * mss : ssthresh
+    }
+
     private func goBack() {
         sndNxt = sndUna
         if finSent, !finAcked { finSent = false }
@@ -424,6 +459,10 @@ final class TCPFlow: @unchecked Sendable {
             return abort(notifyGuest: true)
         }
         rto = min(rto * 2, Self.maxRTO)
+        if state == .established {
+            counters.timeouts += 1
+            reduceWindow(timeout: true)
+        }
         switch state {
         case .synSent, .synReceived:
             sendSYN()
@@ -436,8 +475,14 @@ final class TCPFlow: @unchecked Sendable {
 
     // MARK: Teardown
 
+    private func logCounters(_ how: String) {
+        guard network.debug, counters.segments > 0 else { return }
+        network.log("tcp \(key.remote):\(key.remotePort) \(how): \(counters.segments) segments, \(counters.bytes) bytes, \(counters.fastRetransmits) fast retransmits, \(counters.timeouts) timeouts, cwnd \(cwnd), guest window ≤ \(counters.maxWindow), mss \(mss)")
+    }
+
     private func finishIfDone() {
         guard state == .established, guestFIN, hostWriteShut, hostEOF, finAcked else { return }
+        logCounters("closed")
         state = .closed
         stopTimer()
         socket?.close()
@@ -447,6 +492,7 @@ final class TCPFlow: @unchecked Sendable {
 
     /// Resets both ends. `notifyGuest` sends RST to the guest (it would otherwise keep waiting).
     func abort(notifyGuest: Bool) {
+        logCounters("reset")
         if notifyGuest {
             switch state {
             case .connecting: emit(seq: 0, flags: [.rst, .ack])
