@@ -1,5 +1,6 @@
 import Foundation
 import MaccheriProtocol
+import Network
 import Testing
 @testable import AgentCore
 
@@ -125,4 +126,58 @@ func runsLeaseInDisposableClone(exit: VMExit, expected: JobOutcome) async throws
     #expect(try await runner.runOnce())
     let completed = await source.completed
     #expect(completed.first?.1.outcome == .vmFailed)
+}
+
+@Test(arguments: [("7300:7301", TCPForwarder.Mapping(hostPort: 7300, guestPort: 7301)), ("7300", .init(hostPort: 7300, guestPort: 7300))])
+func parsesForwardSpec(spec: String, expected: TCPForwarder.Mapping) {
+    #expect(TCPForwarder.Mapping(spec) == expected)
+}
+
+@Test(arguments: ["", ":", "0:1", "1:0", "a:1", "1:2:3", "70000:1"])
+func rejectsBadForwardSpec(spec: String) {
+    #expect(TCPForwarder.Mapping(spec) == nil)
+}
+
+/// Echo server on loopback, forwarder in front of it, client through the forwarder.
+@Test func forwardsBothWays() async throws {
+    let queue = DispatchQueue(label: "echo")
+    let echo = try NWListener(using: .tcp, on: .any)
+    echo.newConnectionHandler = { connection in
+        connection.start(queue: queue)
+        func loop() {
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, done, _ in
+                if let data { connection.send(content: data, completion: .contentProcessed { _ in }) }
+                if done { connection.cancel() } else { loop() }
+            }
+        }
+        loop()
+    }
+    try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, any Error>) in
+        echo.stateUpdateHandler = { state in
+            if case .ready = state { c.resume() }
+            if case .failed(let e) = state { c.resume(throwing: e) }
+        }
+        echo.start(queue: queue)
+    }
+    defer { echo.cancel() }
+
+    let forwarder = try TCPForwarder(.init(hostPort: 0, guestPort: echo.port!.rawValue), guestHost: "127.0.0.1")
+    try await forwarder.start()
+    defer { forwarder.stop() }
+
+    let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: forwarder.port!)!, using: .tcp)
+    client.start(queue: queue)
+    defer { client.cancel() }
+    let payload = Data((0..<300_000).map { UInt8($0 % 251) })
+    client.send(content: payload, completion: .contentProcessed { _ in })
+    var received = Data()
+    while received.count < payload.count {
+        let chunk: Data = try await withCheckedThrowingContinuation { c in
+            client.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { data, _, _, error in
+                if let error { c.resume(throwing: error) } else { c.resume(returning: data ?? Data()) }
+            }
+        }
+        received.append(chunk)
+    }
+    #expect(received == payload)
 }
