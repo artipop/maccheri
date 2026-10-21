@@ -4,6 +4,10 @@ import PackageDescription
 let package = Package(
     name: "MaccheriAgent",
     platforms: [.macOS(.v15)],
+    products: [
+        // Maccheri.app links it and runs the agent in-process.
+        .library(name: "AgentCore", targets: ["AgentCore"]),
+    ],
     dependencies: [
         .package(path: "../protocol"),
     ],
