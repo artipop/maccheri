@@ -1,9 +1,10 @@
 // simstream-peer: runs HostPeer without the agent, for testing the web client and the transport.
 //
-//   simstream-peer --guest 127.0.0.1:7300 --control-plane http://localhost:5173 --agent-token dev
-//       Stands in for the agent: long-polls POST /agent/v1/work, serves every simulator lease with
-//       HostPeer against one simstream (`--guest`), reports `ready` and `ended`. Works against the
-//       web client's dev mock (`npm run dev` in web/) and against the real control plane.
+//   simstream-peer --guest 127.0.0.1:7300 --control-plane http://localhost:5173 --shared-token dev
+//       Stands in for the agent: enrolls with the team's shared token (or takes --agent-token),
+//       sends heartbeats, long-polls POST /agent/v1/work, serves every simulator lease with HostPeer
+//       against one simstream (`--guest`), reports `ready` and `ended`. Works against the web
+//       client's dev mock (`npm run dev` in web/) and against the real control plane.
 //   simstream-peer --guest 127.0.0.1:7300 --signal 'wss://…/signal?role=host&token=…' [--ice stun:…]
 //       One session from a signaling URL.
 //
@@ -27,7 +28,7 @@ func args(_ name: String) -> [String] {
 }
 
 let usage = """
-usage: simstream-peer --guest host:port (--control-plane URL --agent-token TOKEN | --signal URL [--ice URL]...) [--relay-only]
+usage: simstream-peer --guest host:port (--control-plane URL [--shared-token TOKEN | --agent-token TOKEN] | --signal URL [--ice URL]...) [--relay-only]
 """
 
 func guestEndpoint() -> (host: String, port: UInt16)? {
@@ -81,6 +82,48 @@ struct Agent {
         return request
     }
 
+    /// `POST /v1/hosts/enroll` with the shared token; returns the agent token.
+    static func enroll(base: URL, sharedToken: String) async throws -> String {
+        func sysctl(_ name: String) -> String {
+            var size = 0
+            sysctlbyname(name, nil, &size, nil, 0)
+            var buffer = [CChar](repeating: 0, count: max(size, 1))
+            sysctlbyname(name, &buffer, &size, nil, 0)
+            return String(cString: buffer)
+        }
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        let hardware = HostHardware(model: sysctl("hw.model"), chip: sysctl("machdep.cpu.brand_string"), cpuCount: ProcessInfo.processInfo.processorCount,
+                                    memoryBytes: ProcessInfo.processInfo.physicalMemory, macOSVersion: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)")
+        var request = URLRequest(url: base.appending(path: HostAPI.enrollPath))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(sharedToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let name = (Host.current().localizedName ?? "Mac") + " (simstream-peer)"
+        request.httpBody = try JSONEncoder().encode(HostEnrollRequest(name: name, hardware: hardware))
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw NSError(domain: "enroll", code: (response as? HTTPURLResponse)?.statusCode ?? 0, userInfo: [NSLocalizedDescriptionKey: String(decoding: data.prefix(300), as: UTF8.self)])
+        }
+        let enrollment = try JSONDecoder().decode(HostEnrollment.self, from: data)
+        print("enrolled as host \(enrollment.hostID)")
+        return enrollment.agentToken
+    }
+
+    /// Keeps the host online with one slot and one device.
+    func heartbeats() async {
+        let capacity = HostCapacity(freeSlots: 1, warmVMs: 1, images: ["macos-27-xcode-27.2"], labels: ["maccheri"], devices: [.iPhone17Pro])
+        while true {
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request(HostAPI.heartbeatPath, body: Heartbeat(agentVersion: "simstream-peer", capacity: capacity)))
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if status >= 300 { print("heartbeat: HTTP \(status)") }
+            } catch {
+                print("heartbeat: \(error)")
+            }
+            try? await Task.sleep(for: .seconds(HostAPI.heartbeatIntervalSeconds))
+        }
+    }
+
     func report(_ sessionID: UUID, _ state: HostSessionState, _ message: String? = nil) async {
         do {
             let (_, response) = try await URLSession.shared.data(for: request(WorkAPI.sessionStatePath(sessionID: sessionID), body: SessionStateReport(state: state, message: message)))
@@ -91,6 +134,7 @@ struct Agent {
     }
 
     func run() async {
+        Task { await heartbeats() }
         print("polling \(base.appending(path: WorkAPI.workPath))")
         while true {
             do {
@@ -123,7 +167,16 @@ struct Agent {
 }
 
 if let base = arg("--control-plane").flatMap(URL.init(string:)) {
-    await Agent(base: base, token: arg("--agent-token") ?? "dev").run()
+    var token = arg("--agent-token") ?? ""
+    if token.isEmpty {
+        do {
+            token = try await Agent.enroll(base: base, sharedToken: arg("--shared-token") ?? "dev")
+        } catch {
+            print("enroll: \(error)")
+            exit(1)
+        }
+    }
+    await Agent(base: base, token: token).run()
 } else if let signal = arg("--signal").flatMap(URL.init(string:)) {
     let ice = args("--ice").map { url -> ICEServer in
         // turn:user:pass@host:port → ICEServer with credentials.

@@ -61,7 +61,13 @@ export function mockControlPlane(): Plugin {
     return chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : ({} as T)
   }
 
-  const user = (req: IncomingMessage) => users.get((req.headers.authorization ?? '').replace(/^Bearer /, ''))
+  // MOCK_SHARED_TOKEN (default `dev`) is the team's shared secret, as MACCHERI_SHARED_TOKEN on the real one.
+  const sharedToken = process.env.MOCK_SHARED_TOKEN ?? 'dev'
+  const agentTokens = new Set<string>()
+  const user = (req: IncomingMessage) => {
+    const bearer = (req.headers.authorization ?? '').replace(/^Bearer /, '')
+    return bearer === sharedToken ? { id: hostID, name: 'team', isAdmin: true } : users.get(bearer)
+  }
 
   /** Hands a queued session to a waiting agent, if both exist. */
   function dispatch() {
@@ -135,6 +141,13 @@ export function mockControlPlane(): Plugin {
       return false
     }
     if (!path.startsWith('/v1/')) return false
+    if (method === 'POST' && path === '/v1/hosts/enroll') {
+      if (!user(req)) return send(res, 401, { error: true, reason: 'Unauthorized' }), true
+      await body(req)
+      const agentToken = token()
+      agentTokens.add(agentToken)
+      return send(res, 200, { hostID, agentToken }), true
+    }
 
     const me = user(req)
     if (!me) return send(res, 401, { error: true, reason: 'Unauthorized' }), true

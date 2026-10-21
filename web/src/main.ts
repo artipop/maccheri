@@ -43,16 +43,25 @@ const preferredTransport = (): VideoTransport => {
 // MARK: - Sign in
 
 function signIn(message = '') {
-  const code = h('input', { name: 'code', placeholder: 'Код приглашения', required: '', autocomplete: 'off', value: params.get('invite') ?? '' })
-  const name = h('input', { name: 'name', placeholder: 'Ваше имя', required: '', value: localStorage.getItem('maccheri.name') ?? '' })
+  const code = h('input', { name: 'code', placeholder: 'Код приглашения или токен команды', required: '', autocomplete: 'off', value: params.get('invite') ?? params.get('token') ?? '' })
+  const name = h('input', { name: 'name', placeholder: 'Ваше имя', value: localStorage.getItem('maccheri.name') ?? '' })
   const error = h('p', { class: 'error' }, message)
-  const form = h('form', { class: 'card narrow' }, h('h1', {}, 'Maccheri'), h('p', { class: 'muted' }, 'Вход по приглашению команды'), code, name, h('button', { type: 'submit' }, 'Войти'), error)
+  const form = h('form', { class: 'card narrow' }, h('h1', {}, 'Maccheri'), h('p', { class: 'muted' }, 'Вход по приглашению или общему токену команды'), code, name, h('button', { type: 'submit' }, 'Войти'), error)
   form.onsubmit = async (e) => {
     e.preventDefault()
     error.textContent = ''
+    const value = code.value.trim()
+    localStorage.setItem('maccheri.name', name.value)
     try {
-      localStorage.setItem('maccheri.name', name.value)
-      await api.redeem({ code: code.value.trim(), name: name.value.trim() })
+      try {
+        await api.redeem({ code: value, name: name.value.trim() || 'Без имени' })
+      } catch (err) {
+        // A control plane without users (docs/contracts.md, «Доступ в мини-проде») has no redeem:
+        // what was typed is the shared token itself.
+        if (!(err instanceof APIError) || (err.status !== 404 && err.status !== 405)) throw err
+        api.token = value
+        await api.hosts().catch((e) => { api.token = null; throw e instanceof APIError && e.status === 401 ? new Error('Неверный токен') : e })
+      }
       history.replaceState(null, '', location.pathname)
       void home()
     } catch (err) {
@@ -65,9 +74,11 @@ function signIn(message = '') {
 // MARK: - Hosts
 
 async function home() {
-  let me, hosts: HostInfo[]
+  let me: { name: string }, hosts: HostInfo[]
   try {
-    ;[me, hosts] = await Promise.all([api.me(), api.hosts()])
+    // Without users there is no /v1/me; the name typed at sign-in stands in.
+    const anonymous = { name: localStorage.getItem('maccheri.name') || 'команда' }
+    ;[me, hosts] = await Promise.all([api.me().catch((e) => { if (e instanceof APIError && e.status === 404) return anonymous; throw e }), api.hosts()])
   } catch (e) {
     if (e instanceof APIError && e.status === 401) { api.token = null; return signIn('Сессия входа истекла, войдите снова') }
     return show(h('div', { class: 'card narrow' }, h('p', { class: 'error' }, errorText(e)), retryButton(home)))
