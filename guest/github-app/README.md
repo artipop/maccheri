@@ -55,6 +55,8 @@ guest/github-app/register.sh <domain> --org <org>     # an App owned by an organ
    ```
    `jq -r .pem ~/.maccheri/github-app-<slug>.json` prints the key; likewise `.client_secret` and
    `.webhook_secret`. The slug builds the install link `https://github.com/apps/<slug>/installations/new`.
+   These are only the App's variables; the rest of the control plane's environment (database,
+   session secret, sign-in allowlist, TURN) is in `deploy/README.md`.
 4. Sign in to the web client with GitHub, create a team and install the App from the team's page on
    the repositories whose jobs the team's Macs should run. For the first run, the test repository from
    `guest/ci-smoke`. Installing from the App's GitHub page directly binds the installation to no team.
