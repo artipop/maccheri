@@ -8,7 +8,8 @@
 //   simstream-peer --guest 127.0.0.1:7300 --signal 'wss://…/signal?role=host&token=…' [--ice stun:…]
 //       One session from a signaling URL.
 //
-// Options: --relay-only (force TURN).
+// Options: --relay-only (force TURN), --insecure (accept any TLS certificate: a dev server with a
+// self-signed one).
 
 import Foundation
 import MaccheriProtocol
@@ -48,10 +49,22 @@ guard guestEndpoint() != nil else {
     return NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: NWParameters(tls: nil, tcp: tcp))
 }
 
+/// Trusts any server certificate; only with --insecure.
+final class TrustAll: NSObject, URLSessionDelegate {
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge) async -> (URLSession.AuthChallengeDisposition, URLCredential?) {
+        guard let trust = challenge.protectionSpace.serverTrust else { return (.performDefaultHandling, nil) }
+        return (.useCredential, URLCredential(trust: trust))
+    }
+}
+
+let http: URLSession = CommandLine.arguments.contains("--insecure")
+    ? URLSession(configuration: .default, delegate: TrustAll(), delegateQueue: nil)
+    : .shared
+
 func serve(sessionID: UUID, signaling: SignalingInfo) async {
     var options = HostPeer.Options()
     options.relayOnly = CommandLine.arguments.contains("--relay-only")
-    let peer = HostPeer(transport: WebSocketSignaling(url: signaling.url), iceServers: signaling.iceServers, sessionID: sessionID,
+    let peer = HostPeer(transport: WebSocketSignaling(url: signaling.url, session: http), iceServers: signaling.iceServers, sessionID: sessionID,
                         options: options, connectToGuest: connectToGuest)
     do {
         let reason = try await peer.run()
@@ -100,7 +113,7 @@ struct Agent {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let name = (Host.current().localizedName ?? "Mac") + " (simstream-peer)"
         request.httpBody = try JSONEncoder().encode(HostEnrollRequest(name: name, hardware: hardware))
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await http.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw NSError(domain: "enroll", code: (response as? HTTPURLResponse)?.statusCode ?? 0, userInfo: [NSLocalizedDescriptionKey: String(decoding: data.prefix(300), as: UTF8.self)])
         }
@@ -114,7 +127,7 @@ struct Agent {
         let capacity = HostCapacity(freeSlots: 1, warmVMs: 1, images: ["macos-27-xcode-27.2"], labels: ["maccheri"], devices: [.iPhone17Pro])
         while true {
             do {
-                let (_, response) = try await URLSession.shared.data(for: request(HostAPI.heartbeatPath, body: Heartbeat(agentVersion: "simstream-peer", capacity: capacity)))
+                let (_, response) = try await http.data(for: request(HostAPI.heartbeatPath, body: Heartbeat(agentVersion: "simstream-peer", capacity: capacity)))
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 if status >= 300 { print("heartbeat: HTTP \(status)") }
             } catch {
@@ -126,7 +139,7 @@ struct Agent {
 
     func report(_ sessionID: UUID, _ state: HostSessionState, _ message: String? = nil) async {
         do {
-            let (_, response) = try await URLSession.shared.data(for: request(WorkAPI.sessionStatePath(sessionID: sessionID), body: SessionStateReport(state: state, message: message)))
+            let (_, response) = try await http.data(for: request(WorkAPI.sessionStatePath(sessionID: sessionID), body: SessionStateReport(state: state, message: message)))
             print("session \(sessionID): reported \(state) → \((response as? HTTPURLResponse)?.statusCode ?? 0)")
         } catch {
             print("session \(sessionID): report \(state): \(error)")
@@ -138,7 +151,7 @@ struct Agent {
         print("polling \(base.appending(path: WorkAPI.workPath))")
         while true {
             do {
-                let (data, response) = try await URLSession.shared.data(for: request(WorkAPI.workPath, body: LeaseRequest(labels: ["maccheri"], freeSlots: 1)))
+                let (data, response) = try await http.data(for: request(WorkAPI.workPath, body: LeaseRequest(labels: ["maccheri"], freeSlots: 1)))
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard status == 200 else {
                     if status != 204 {

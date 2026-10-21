@@ -42,8 +42,9 @@ export function mockControlPlane(): Plugin {
       return m ? { urls: [`${m[1]}:${m[4]}`], username: decodeURIComponent(m[2]), credential: decodeURIComponent(m[3]) } : { urls: [url] }
     })
 
+  const secure = !!process.env.DEV_HTTPS_CERT
   const signaling = (s: Session, role: SignalingRole, host: string) => ({
-    url: `ws://${host}/v1/sessions/${s.info.id}/signal?role=${role}&token=${s.tokens[role]}`,
+    url: `${secure ? 'wss' : 'ws'}://${host}/v1/sessions/${s.info.id}/signal?role=${role}&token=${s.tokens[role]}`,
     token: s.tokens[role],
     iceServers: iceServers(),
   })

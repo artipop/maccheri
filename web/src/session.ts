@@ -51,6 +51,13 @@ export class SimSession {
   private ended = false
   private pendingCandidates: RTCIceCandidateInit[] = []
   hello: Hello | null = null
+  /** What happened, for debugging (`maccheri.session.log` in the console). */
+  readonly log: string[] = []
+
+  private note(line: string) {
+    this.log.push(`${(performance.now() / 1000).toFixed(2)} ${line}`)
+    if (this.log.length > 500) this.log.shift()
+  }
 
   /** `relayOnly` forces TURN (testing the relay path). */
   constructor(private signaling: SignalingInfo, readonly transport: VideoTransport, private events: SessionEvents, relayOnly = false) {
@@ -65,7 +72,10 @@ export class SimSession {
     pc.onicecandidate = (e) => {
       if (e.candidate) this.signal({ candidate: { candidate: e.candidate.candidate, sdpMid: e.candidate.sdpMid, sdpMLineIndex: e.candidate.sdpMLineIndex } })
     }
+    pc.oniceconnectionstatechange = () => this.note(`ice ${pc.iceConnectionState}`)
+    pc.onicecandidateerror = (e) => this.note(`candidate error ${(e as RTCPeerConnectionIceErrorEvent).errorCode} ${(e as RTCPeerConnectionIceErrorEvent).errorText} ${(e as RTCPeerConnectionIceErrorEvent).url}`)
     pc.onconnectionstatechange = () => {
+      this.note(`connection ${pc.connectionState}`)
       switch (pc.connectionState) {
         case 'connected': this.events.onState('connected'); break
         case 'disconnected': this.events.onState('reconnecting'); break
@@ -103,6 +113,7 @@ export class SimSession {
 
   private async onSignal(m: SignalMessage) {
     const pc = this.pc
+    this.note(`signal in ${Object.keys(m)[0]}${'candidate' in m ? ` ${m.candidate.candidate}` : ''}`)
     try {
       if ('offer' in m) {
         await pc.setRemoteDescription({ type: 'offer', sdp: m.offer.sdp })
@@ -121,10 +132,12 @@ export class SimSession {
       }
     } catch (e) {
       console.warn('signaling', m, e)
+      this.note(`signal error ${e}`)
     }
   }
 
   private signal(m: SignalMessage) {
+    this.note(`signal out ${Object.keys(m)[0]}${'candidate' in m ? ` ${m.candidate.candidate}` : ''}`)
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(m))
     else this.ws?.addEventListener('open', () => this.ws?.send(JSON.stringify(m)), { once: true })
   }

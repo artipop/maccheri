@@ -24,6 +24,7 @@ const { values: o } = parseArgs({ options: {
   hold: { type: 'string', default: '60' },
   headed: { type: 'boolean', default: false },
   executable: { type: 'string' },
+  log: { type: 'boolean', default: false },
 } })
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -58,7 +59,7 @@ async function webdriver() {
     if (!r.ok) throw new Error(`${method} ${path}: ${JSON.stringify(j.value).slice(0, 300)}`)
     return j.value
   }
-  const { sessionId } = await wd('POST', '/session', { capabilities: { alwaysMatch: { browserName: o.browser } } })
+  const { sessionId } = await wd('POST', '/session', { capabilities: { alwaysMatch: { browserName: o.browser, acceptInsecureCerts: true } } })
   const s = `/session/${sessionId}`
   await wd('POST', `${s}/window/rect`, { width: 900, height: 1100 })
   const pointer = (actions) => wd('POST', `${s}/actions`, { actions: [{ type: 'pointer', id: 'mouse', parameters: { pointerType: 'mouse' }, actions }] })
@@ -91,7 +92,12 @@ try {
   await b.eval(`(() => { document.querySelector('input[name=name]').value = ${JSON.stringify(o.browser)}; document.querySelector('form button[type=submit]').click() })()`)
   await waitFor(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Новая сессия')`)
   await b.eval(`[...document.querySelectorAll('button')].find((b) => b.textContent === 'Новая сессия').click()`)
-  await waitFor(`!!document.querySelector('.screen .video') && /fps/.test(document.querySelector('.overlay')?.textContent ?? '')`)
+  try {
+    await waitFor(`!!document.querySelector('.screen .video') && /fps/.test(document.querySelector('.overlay')?.textContent ?? '')`)
+  } catch (e) {
+    console.log((await b.eval(`window.maccheri?.session.log ?? []`)).join('\n'))
+    throw e
+  }
   await sleep(2500)
   const center = await b.eval(`(() => { const r = document.querySelector('.screen').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] })()`)
 
@@ -123,7 +129,8 @@ try {
     await sleep(250 + Math.random() * 150)
   }
   await sleep(1000)
-  console.log(await b.eval(`document.querySelector('.overlay').textContent`))
+  console.log(await b.eval(`document.querySelector('.overlay')?.textContent ?? document.querySelector('#app').textContent`))
+  if (o.log) console.log((await b.eval(`window.maccheri?.session.log ?? []`)).join('\n'))
   if (taps > 0) {
     const samples = await b.eval(`maccheri.session.samples`)
     const sorted = [...samples].sort((a, c) => a - c)
