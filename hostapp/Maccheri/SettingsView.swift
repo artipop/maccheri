@@ -23,6 +23,9 @@ private struct ConnectionSettings: View {
         Form {
             if let credentials = host.credentials {
                 LabeledContent("Server", value: credentials.controlPlane.absoluteString)
+                if let team = credentials.teamName {
+                    LabeledContent("Team", value: team)
+                }
                 LabeledContent("This Mac", value: HostInventory.computerName)
                 LabeledContent("Host ID", value: credentials.hostID.uuidString)
                     .textSelection(.enabled)
@@ -43,18 +46,19 @@ private struct ConnectionSettings: View {
     }
 }
 
-/// Server address and token → enrolled. Shown in the menu bar window and in Settings.
+/// Server address and the team's enrollment code (or a v1 server's shared token) → enrolled.
+/// Shown in the menu bar window and in Settings.
 struct ConnectForm: View {
     @Bindable var host: HostModel
     @State private var address = ""
-    @State private var token = ""
+    @State private var secret = ""
     @State private var connecting = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("Server", text: $address, prompt: Text("maccheri.example.com"))
                 .textContentType(.URL)
-            SecureField("Token", text: $token, prompt: Text("from the team's admin"))
+            SecureField("Code or token", text: $secret, prompt: Text("from the team's admin"))
                 .onSubmit(connect)
             if let error = host.enrollmentError {
                 Text(error)
@@ -67,7 +71,7 @@ struct ConnectForm: View {
                 Spacer()
                 Button(connecting ? "Connecting…" : "Connect This Mac", action: connect)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(connecting || address.trimmingCharacters(in: .whitespaces).isEmpty || token.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(connecting || address.trimmingCharacters(in: .whitespaces).isEmpty || secret.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
         .textFieldStyle(.roundedBorder)
@@ -78,9 +82,9 @@ struct ConnectForm: View {
         guard !connecting else { return }
         connecting = true
         Task {
-            await host.enroll(controlPlane: address, token: token)
+            await host.enroll(controlPlane: address, secret: secret)
             connecting = false
-            if host.credentials != nil { token = "" }
+            if host.credentials != nil { secret = "" }
         }
     }
 }

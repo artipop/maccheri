@@ -26,6 +26,26 @@ public enum ControlPlaneError: Error, Equatable, CustomStringConvertible {
     }
 }
 
+/// What the owner pastes to enroll a Mac.
+public enum EnrollmentSecret: Sendable, Equatable {
+    /// v2: a one-time code an admin created for the team (`POST /v1/teams/{id}/host-codes`).
+    case code(String)
+    /// v1 (Vapor): the control plane's shared token, sent as `Authorization: Bearer`.
+    case sharedToken(String)
+
+    public static let codePrefix = "hc_"
+
+    /// A code if it looks like one, otherwise the shared token.
+    public init(_ text: String) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        self = text.hasPrefix(Self.codePrefix) ? .code(text) : .sharedToken(text)
+    }
+
+    public var isCode: Bool {
+        if case .code = self { true } else { false }
+    }
+}
+
 public struct ControlPlaneClient: ControlPlane {
     public let baseURL: URL
     public let token: String
@@ -37,9 +57,20 @@ public struct ControlPlaneClient: ControlPlane {
         self.session = session
     }
 
-    /// Registers this Mac with the owner's user token; the result goes into ``AgentCredentials``.
-    public static func enroll(baseURL: URL, userToken: String, _ request: HostEnrollRequest, session: URLSession = .shared) async throws -> HostEnrollment {
-        let client = ControlPlaneClient(baseURL: baseURL, token: userToken, session: session)
+    /// Registers this Mac with a team's enrollment code (v2) or the shared token (v1); the result goes
+    /// into ``AgentCredentials``.
+    public static func enroll(baseURL: URL, secret: EnrollmentSecret, _ request: HostEnrollRequest, session: URLSession = .shared) async throws -> HostEnrollment {
+        var request = request
+        let client: ControlPlaneClient
+        switch secret {
+        case let .code(code):
+            // v2: the code says which team; no bearer token.
+            request.code = code
+            client = ControlPlaneClient(baseURL: baseURL, token: "", session: session)
+        case let .sharedToken(token):
+            request.code = nil
+            client = ControlPlaneClient(baseURL: baseURL, token: token, session: session)
+        }
         let (data, response) = try await client.post(HostAPI.enrollPath, body: request)
         try check(response, data)
         return try JSONDecoder.maccheri.decode(HostEnrollment.self, from: data)
@@ -83,7 +114,7 @@ public struct ControlPlaneClient: ControlPlane {
         var request = URLRequest(url: baseURL.appending(path: path), timeoutInterval: timeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         request.httpBody = try JSONEncoder.maccheri.encode(body)
         let (data, response) = try await session.data(for: request)
         return (data, response as! HTTPURLResponse)

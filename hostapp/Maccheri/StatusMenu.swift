@@ -73,11 +73,15 @@ struct StatusMenu: View {
     private var connection: some View {
         if host.credentials == nil {
             Label("Not connected to a pool", systemImage: "circle.dashed")
-            Text("Enter your team's Maccheri server and the token you were given.")
+            Text("Enter your team's Maccheri server and the code from your team's admin.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             ConnectForm(host: host)
         } else {
+            if let team = host.credentials?.teamName {
+                Label(team, systemImage: "person.3")
+                    .font(.headline)
+            }
             switch host.status.connection {
             case .online:
                 Label(host.isPaused ? "Online, paused" : "Online", systemImage: "circle.fill")

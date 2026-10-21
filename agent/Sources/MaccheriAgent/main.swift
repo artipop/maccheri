@@ -2,12 +2,12 @@ import AgentCore
 import Foundation
 import MaccheriProtocol
 
-// maccheri-agent enroll --control-plane URL --user-token TOKEN [--name NAME]
+// maccheri-agent enroll --control-plane URL (--code CODE | --user-token TOKEN) [--name NAME]
 // maccheri-agent run --images DIR --work DIR [--warm N] [--max-vms N] [--cpus N] [--memory-gb N]
 //                    [--control-plane URL --token TOKEN] [--stub-peer]
 //
-// The headless agent. `enroll` registers this Mac with the owner's user token and keeps the agent
-// token in the login keychain; `run` uses it (or `--token` / MACCHERI_AGENT_TOKEN) until stopped.
+// The headless agent. `enroll` registers this Mac with a team's enrollment code (v2) or the control
+// plane's shared token (v1) and keeps the agent token in the login keychain; `run` uses it (or `--token` / MACCHERI_AGENT_TOKEN) until stopped.
 func argument(_ name: String) -> String? {
     let args = CommandLine.arguments
     guard let index = args.firstIndex(of: name), index + 1 < args.count else { return nil }
@@ -15,7 +15,7 @@ func argument(_ name: String) -> String? {
 }
 
 let usage = """
-    usage: maccheri-agent enroll --control-plane URL --user-token TOKEN [--name NAME]
+    usage: maccheri-agent enroll --control-plane URL (--code CODE | --user-token TOKEN) [--name NAME]
            maccheri-agent run --images DIR --work DIR [--warm N] [--max-vms N] [--cpus N] [--memory-gb N]
                               [--control-plane URL --token TOKEN] [--stub-peer]
 
@@ -31,15 +31,23 @@ setvbuf(stdout, nil, _IOLBF, 0)
 
 switch CommandLine.arguments.dropFirst().first {
 case "enroll":
-    guard let controlPlane = argument("--control-plane").flatMap(URL.init(string:)),
-          let userToken = argument("--user-token") ?? ProcessInfo.processInfo.environment["MACCHERI_USER_TOKEN"]
-    else { fail(usage) }
+    let environment = ProcessInfo.processInfo.environment
+    let secret: EnrollmentSecret
+    if let code = argument("--code") ?? environment["MACCHERI_ENROLL_CODE"] {
+        secret = .code(code.trimmingCharacters(in: .whitespacesAndNewlines))
+    } else if let token = argument("--user-token") ?? environment["MACCHERI_USER_TOKEN"] {
+        secret = .sharedToken(token.trimmingCharacters(in: .whitespacesAndNewlines))
+    } else {
+        fail(usage)
+    }
+    guard let controlPlane = argument("--control-plane").flatMap(URL.init(string:)) else { fail(usage) }
     let request = HostEnrollRequest(name: argument("--name") ?? HostInventory.computerName, hardware: HostInventory.hardware())
     Task {
         do {
-            let enrollment = try await ControlPlaneClient.enroll(baseURL: controlPlane, userToken: userToken, request)
-            try AgentCredentials(controlPlane: controlPlane, hostID: enrollment.hostID, agentToken: enrollment.agentToken).save()
-            print("enrolled \(request.name) as host \(enrollment.hostID); token saved to the keychain")
+            let enrollment = try await ControlPlaneClient.enroll(baseURL: controlPlane, secret: secret, request)
+            try AgentCredentials(controlPlane: controlPlane, enrollment: enrollment).save()
+            let team = enrollment.teamName.map { " in team \($0)" } ?? ""
+            print("enrolled \(request.name) as host \(enrollment.hostID)\(team); token saved to the keychain")
             exit(0)
         } catch {
             fail("enroll failed: \(error)", code: 1)
